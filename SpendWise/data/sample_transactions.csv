@@ -1,0 +1,16 @@
+date,merchant,amount,category,description,source
+01-10-2026,Swiggy,450,Food,Dinner,Text
+01-10-2026,Uber,230,Transport,College,CSV
+02-10-2026,Amazon,1800,Shopping,Shoes,Receipt
+02-10-2026,Starbucks,550,Food,Coffee & sandwich with team,Receipt
+03-10-2026,Myntra,2400,Shopping,Winter jacket & apparel,CSV
+03-10-2026,Airtel,899,Bills,Fiber broadband & mobile plan,CSV
+04-10-2026,Barbeque Nation,1250,Food,Birthday dinner buffet,Receipt
+04-10-2026,Rapido,320,Transport,Lab commute rides,Text
+05-10-2026,Croma,1900,Shopping,Wireless keyboard & mouse,Receipt
+05-10-2026,Blue Tokai,750,Food,Artisan coffee & bakery,Text
+06-10-2026,Spotify,119,Entertainment,Student premium subscription,CSV
+06-10-2026,Apollo Pharmacy,480,Healthcare,Vitamins & first aid,Receipt
+07-10-2026,Coursera,1450,Education,ML Specialization certificate,CSV
+07-10-2026,BESCOM,1350,Bills,Monthly electricity bill,CSV
+08-10-2026,Crossword,390,Others,Stationery & notebooks,Text

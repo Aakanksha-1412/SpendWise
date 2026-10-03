@@ -1,0 +1,18 @@
+# SpendWise — Official Python Dependencies (Python 3.10+)
+streamlit>=1.36.0
+pandas>=2.2.0
+plotly>=5.22.0
+python-dotenv>=1.0.1
+
+# Agentic Orchestration & LLM Integration
+langchain>=0.2.10
+langchain-core>=0.2.22
+langchain-google-genai>=1.0.7
+langgraph>=0.1.14
+
+# Vector Memory & Semantic Categorization
+chromadb>=0.5.4
+
+# Receipt OCR & Image Processing
+pillow>=10.4.0
+pytesseract>=0.3.10
