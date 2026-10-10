@@ -16,12 +16,21 @@ from langchain_core.messages import AIMessage
 
 import agent.graph as graph
 import database.database as database
+from agent import memory
 
 
 @pytest.fixture(autouse=True)
 def fresh_db(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "spendwise_test.db"))
     database.init_db()
+
+
+@pytest.fixture(autouse=True)
+def new_chat():
+    """Every test starts with an empty chat memory."""
+    memory.forget_all()
+    yield
+    memory.forget_all()
 
 
 class FakeGemini:

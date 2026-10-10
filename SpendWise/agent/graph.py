@@ -33,6 +33,7 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
+from agent import memory
 from agent.fallback_agent import run_fallback_agent
 
 # The real agent needs LangChain + LangGraph. If they aren't installed, the app still
@@ -182,11 +183,21 @@ def run_agent(
     """
     Called by `pages/assistant.py`.
 
-    chat_history (optional): the earlier messages of this chat, in the Assistant page's
-    format [{"role": "user" | "assistant", "content": str, ...}], so follow-ups like
-    "yes, log it" make sense.
+    Short-term memory: the agent remembers this chat by itself (`agent/memory.py`), so
+    follow-ups like "yes, log it" make sense. `chat_history` (optional) lets a caller
+    pass its own history instead: [{"role": "user" | "assistant", "content": str, ...}].
 
-    Runs the Gemini agent and returns:
+    Returns the dict described in `_answer`.
+    """
+    history = chat_history if chat_history is not None else memory.recent_messages()
+    result = _answer(user_query, uploaded_receipt, history)
+    memory.remember(user_query, result["response"])
+    return result
+
+
+def _answer(user_query: str, uploaded_receipt: Any, chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Runs the Gemini agent (or the fallback) for one question and returns:
         {
             "response": str,              final answer (Markdown)
             "mode": "llm" | "fallback",
