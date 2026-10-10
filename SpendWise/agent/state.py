@@ -10,8 +10,11 @@ Responsibility:
 
 from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
-from langchain_core.messages import AnyMessage
-from langgraph.graph.message import add_messages
+try:
+    from langgraph.graph.message import add_messages
+except ImportError:  # keeps the offline fallback importable without langgraph
+    def add_messages(left: list, right: list) -> list:
+        return left + right
 
 
 class AgentState(TypedDict, total=False):
@@ -30,7 +33,7 @@ class AgentState(TypedDict, total=False):
         -> tool_outputs -> evaluation_notes -> final_response
     """
     # Real agent (LangGraph + Gemini)
-    messages: Annotated[List[AnyMessage], add_messages]
+    messages: Annotated[List[Any], add_messages]
 
     # Shared
     user_query: str

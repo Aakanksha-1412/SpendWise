@@ -287,7 +287,13 @@ def evaluate_result_node(state: AgentState) -> AgentState:
 
     if intent == "AFFORDABILITY_CHECK" and "category_budget_status" in outputs:
         b_stat = outputs["category_budget_status"]
-        amt_match = re.search(r"(?:₹|rs\.?|inr\s*)?\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)", query, re.IGNORECASE)
+        # Prefer a number marked as money ("₹500", "rs 500", "500 rupees") over any other number ("2 pizzas")
+        number = r"(\d+(?:,\d{3})*(?:\.\d{1,2})?)"
+        amt_match = (
+            re.search(r"(?:₹|\brs\.?|\binr)\s*" + number, query, re.IGNORECASE)
+            or re.search(number + r"\s*(?:rs\b|rupees\b|inr\b|/-)", query, re.IGNORECASE)
+            or re.search(number, query)
+        )
         proposed_amt = float(amt_match.group(1).replace(",", "")) if amt_match else 500.0
         post_remaining = round(b_stat["remaining"] - proposed_amt, 2)
         can_afford = post_remaining >= 0

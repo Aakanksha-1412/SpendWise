@@ -9,6 +9,8 @@ Responsibility:
   The real logic stays in `tools/`, `analytics/` and `database/` (owned by Members 2, 3, 4).
 - The LLM never runs these functions itself. It only *requests* one (name + arguments);
   LangGraph's ToolNode in `agent/graph.py` executes it and sends the result back.
+- Wrappers also check the LLM's arguments (category spelling, positive amounts) before
+  calling teammates' code, and always ask for the CURRENT month's data.
 
 How the LLM sees a tool:
 - Function name        -> the tool's name
@@ -16,7 +18,9 @@ How the LLM sees a tool:
 - Type-hinted inputs   -> the arguments the LLM must fill in
 """
 
-from typing import Any, Dict, List, Optional
+from contextvars import ContextVar
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.tools import tool
 
@@ -30,20 +34,35 @@ from tools.categorization_tool import categorize_expense
 from tools.database_tool import add_transaction, get_transactions
 from tools.ocr_tool import extract_receipt
 from tools.spike_detector import detect_all_category_spikes, detect_spending_spike
+from utils.helpers import CATEGORIES
 
 # ------------------------------------------------------------------------------
 # Receipt hand-off
 # An image can't be passed through the LLM as a text argument, so the UI hands the
 # uploaded file to `run_agent()`, which stores it here. The `read_uploaded_receipt`
-# tool then picks it up. (Fine for a single-user local app.)
+# tool then picks it up. A ContextVar keeps each Streamlit session's receipt separate.
 # ------------------------------------------------------------------------------
-_current_receipt: Any = None
+current_receipt: ContextVar[Any] = ContextVar("current_receipt", default=None)
 
 
-def set_current_receipt(receipt_file: Any) -> None:
-    """Called by `agent/graph.py` before each run with the uploaded image (or None)."""
-    global _current_receipt
-    _current_receipt = receipt_file
+# ------------------------------------------------------------------------------
+# Argument checks (the LLM may write "food", "groceries", -300 ...)
+# ------------------------------------------------------------------------------
+def _this_month() -> Dict[str, int]:
+    now = datetime.now()
+    return {"month": now.month, "year": now.year}
+
+
+def _match_category(category: Optional[str]) -> Tuple[Optional[str], Optional[Dict[str, str]]]:
+    """Return (official category name, None) or (None, error for the LLM)."""
+    wanted = (category or "").strip().lower()
+    for official in CATEGORIES:
+        if official.lower() == wanted:
+            return official, None
+    return None, {
+        "error": f"Unknown category '{category}'. Use one of: {', '.join(CATEGORIES)}. "
+        "If unsure, call suggest_category first."
+    }
 
 
 # ==============================================================================
@@ -55,21 +74,24 @@ def get_budget_status(category: str) -> Dict[str, Any]:
     (UNDER BUDGET / NEAR LIMIT / OVER BUDGET) for ONE category.
     Use for questions like "how much food budget is left?" or "how much did I spend on transport?".
     `category` must be one of: Food, Transport, Shopping, Entertainment, Bills, Healthcare, Education, Others."""
-    return calculate_budget_status(category)
+    official, error = _match_category(category)
+    if error:
+        return error
+    return calculate_budget_status(official, **_this_month())
 
 
 @tool
 def get_all_budgets_overview() -> List[Dict[str, Any]]:
     """Get budget vs spending status for ALL 8 categories this month.
     Use to find which categories are over budget, or to explain why a budget alert was raised."""
-    return get_all_budget_statuses()
+    return get_all_budget_statuses(**_this_month())
 
 
 @tool
 def get_monthly_summary() -> Dict[str, Any]:
     """Get the overall picture for this month: total spent, total monthly budget,
     remaining budget and number of active alerts. Use for general "how am I doing?" questions."""
-    return get_summary_metrics()
+    return get_summary_metrics(**_this_month())
 
 
 @tool
@@ -77,14 +99,17 @@ def get_saving_suggestions() -> Dict[str, Any]:
     """Find categories that are OVER budget and discretionary categories that still have
     unused budget, with ready-made suggestions on where to cut back.
     Use for "where can I reduce spending?" or "how do I fix my shopping overspend?"."""
-    return suggest_discretionary_reallocation()
+    return suggest_discretionary_reallocation(**_this_month())
 
 
 @tool
 def check_spending_spike(category: str) -> Dict[str, Any]:
     """Compare this week's spending with last week's for ONE category and report whether
     there is an unusual spike (amounts and % increase)."""
-    return detect_spending_spike(category)
+    official, error = _match_category(category)
+    if error:
+        return error
+    return detect_spending_spike(official)
 
 
 @tool
@@ -103,6 +128,10 @@ def search_transactions(
     """List recent individual transactions (newest first), optionally filtered by category
     and/or merchant name (partial match, e.g. "swiggy"). Use to show which purchases
     caused an overspend, or to answer "what did I buy at Amazon?"."""
+    if category:
+        category, error = _match_category(category)
+        if error:
+            return [error]
     rows = get_transactions(category=category, merchant_query=merchant)
     return rows[: max(1, min(limit, 50))]
 
@@ -112,9 +141,14 @@ def check_affordability(category: str, amount: float) -> Dict[str, Any]:
     """Check whether a NEW planned expense of `amount` rupees in `category` fits within
     the remaining budget. Returns the current remaining budget and what would be left after.
     Use for "can I afford ₹500 on food?" or "is 500 rs on pizza ok?"."""
+    official, error = _match_category(category)
+    if error:
+        return error
+    if amount <= 0:
+        return {"error": "Amount must be greater than 0."}
     # Simple deterministic maths so the LLM never has to calculate.
     # (Could move into tools/budget_tool.py later — ask Member 3.)
-    status = calculate_budget_status(category)
+    status = calculate_budget_status(official, **_this_month())
     left_after = round(status["remaining"] - amount, 2)
     return {
         "category": status["category"],
@@ -149,17 +183,30 @@ def add_expense(
     """SAVE a new expense to the database. Only call this when the user clearly asks to
     add/log/record an expense (or a receipt was read and they want it added).
     `category` must be one of: Food, Transport, Shopping, Entertainment, Bills, Healthcare, Education, Others.
-    `date` is DD-MM-YYYY (leave empty for today). `source` is "Text" or "Receipt"."""
-    return add_transaction(
+    `date` is DD-MM-YYYY (leave empty for today). `source` is "Text" or "Receipt".
+    The result already includes the category's UPDATED budget status (`budget_after_saving`),
+    so there is no need to call get_budget_status afterwards."""
+    official, error = _match_category(category)
+    if error:
+        return {**error, "saved": False}
+    if amount <= 0:
+        return {"error": "Amount must be greater than 0. Ask the user for the correct amount.", "saved": False}
+
+    saved = add_transaction(
         {
             "merchant": merchant,
             "amount": amount,
-            "category": category,
+            "category": official,
             "date": date or "",
             "description": description,
             "source": source,
         }
     )
+    return {
+        "saved": True,
+        "transaction": saved,
+        "budget_after_saving": calculate_budget_status(official, **_this_month()),
+    }
 
 
 @tool
@@ -167,9 +214,10 @@ def read_uploaded_receipt() -> Dict[str, Any]:
     """Read the receipt image the user uploaded with this message (OCR) and return
     merchant, date, items, tax, total and suggested category. Does NOT save it —
     call `add_expense` afterwards if the user wants it added."""
-    if _current_receipt is None:
+    receipt = current_receipt.get()
+    if receipt is None:
         return {"error": "No receipt image was uploaded with this message."}
-    return extract_receipt(_current_receipt)
+    return extract_receipt(receipt)
 
 
 # ------------------------------------------------------------------------------
@@ -189,3 +237,7 @@ ALL_TOOLS = [
     add_expense,
     read_uploaded_receipt,
 ]
+
+# Tools that change data. If one of these already ran, the agent must not re-run the
+# request through the fallback (that would save the same expense twice).
+WRITE_TOOLS = {"add_expense"}

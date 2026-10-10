@@ -17,8 +17,8 @@ Responsibility:
        └─ no  → END      Gemini's reply is the final answer
 
 - LLM reasoning (Gemini) is kept separate from deterministic calculations (tools/).
-- If Gemini is unavailable (no API key, no internet, quota), falls back to the
-  keyword-based demo agent in `agent/fallback_agent.py` so the app still works.
+- If Gemini is unavailable (no API key, no internet, quota) before any tool has run,
+  falls back to the keyword-based demo agent in `agent/fallback_agent.py`.
 
 Public interface (used by `pages/assistant.py`):
     run_agent(user_query, uploaded_receipt=None) -> dict
@@ -29,50 +29,68 @@ import logging
 import os
 from datetime import datetime
 from functools import lru_cache
-from typing import Any, Dict, List, Tuple
-
-from dotenv import dotenv_values
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
-from langgraph.graph import END, START, StateGraph
-from langgraph.prebuilt import ToolNode
+from typing import Any, Dict, List, Optional, Tuple
 
 from agent.fallback_agent import run_fallback_agent
-from agent.prompts import ORCHESTRATOR_SYSTEM_PROMPT
-from agent.state import AgentState
-from agent.tools_registry import ALL_TOOLS, set_current_receipt
+
+# The real agent needs LangChain + LangGraph. If they aren't installed, the app still
+# runs using the fallback agent (see `run_agent`).
+try:
+    from dotenv import dotenv_values
+    from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+    from langgraph.errors import GraphRecursionError
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.prebuilt import ToolNode
+
+    from agent.prompts import ORCHESTRATOR_SYSTEM_PROMPT
+    from agent.state import AgentState
+    from agent.tools_registry import ALL_TOOLS, WRITE_TOOLS, current_receipt
+
+    AGENT_LIBRARIES_AVAILABLE = True
+except ImportError as import_error:  # pragma: no cover - depends on the environment
+    AGENT_LIBRARIES_AVAILABLE = False
+    _IMPORT_ERROR = import_error
 
 logger = logging.getLogger(__name__)
 
-# Read only the agent's settings from SpendWise/.env (real environment variables win).
-_ENV_FILE = dotenv_values(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
-
-
-def _setting(name: str, default: str = "") -> str:
-    return (os.getenv(name) or _ENV_FILE.get(name) or default).strip()
-
-
+ENV_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 DEFAULT_MODEL = "gemini-3.8-flash"
 # Safety net: stop if the agent <-> tools loop runs more than this many steps.
 MAX_GRAPH_STEPS = 12
 
 
+class LLMUnavailableError(Exception):
+    """Gemini could not be reached (network, quota, wrong model, bad key ...)."""
+
+
 # ==============================================================================
 # 1. THE LLM (Gemini with our tools attached)
 # ==============================================================================
-@lru_cache(maxsize=1)
+def _setting(name: str, default: str = "") -> str:
+    """Read a setting from real environment variables, else from SpendWise/.env.
+    Re-read on every request, so editing .env takes effect without restarting."""
+    value = os.getenv(name) or dotenv_values(ENV_FILE_PATH).get(name) or default
+    return value.strip()
+
+
 def _get_llm_with_tools():
     """
-    Create the Gemini chat model and attach (`bind_tools`) our tool list, so Gemini
-    knows each tool's name, description and inputs. Returns None if no API key is set.
+    Return Gemini with our tool list attached (`bind_tools`), so Gemini knows each
+    tool's name, description and inputs. Returns None if no API key is set.
     """
     api_key = _setting("GEMINI_API_KEY")
     if not api_key or api_key.startswith("your_"):
         return None
+    return _build_llm(api_key, _setting("GEMINI_MODEL", DEFAULT_MODEL))
 
+
+@lru_cache(maxsize=4)
+def _build_llm(api_key: str, model: str):
+    """Create the model once per (key, model) pair and reuse it."""
     from langchain_google_genai import ChatGoogleGenerativeAI
 
     llm = ChatGoogleGenerativeAI(
-        model=_setting("GEMINI_MODEL", DEFAULT_MODEL),
+        model=model,
         google_api_key=api_key,
         temperature=0,  # 0 = most consistent answers, best for finance
     )
@@ -82,16 +100,22 @@ def _get_llm_with_tools():
 # ==============================================================================
 # 2. THE GRAPH (nodes + edges)
 # ==============================================================================
-def agent_node(state: AgentState) -> AgentState:
+def agent_node(state: "AgentState") -> "AgentState":
     """
     NODE "agent": send the conversation so far to Gemini.
     Gemini replies EITHER with tool request(s) OR with the final answer text.
     """
-    reply = _get_llm_with_tools().invoke(state["messages"])
+    llm = _get_llm_with_tools()
+    if llm is None:
+        raise LLMUnavailableError("GEMINI_API_KEY is not set")
+    try:
+        reply = llm.invoke(state["messages"])
+    except Exception as exc:  # only errors from talking to Gemini are treated as "unavailable"
+        raise LLMUnavailableError(type(exc).__name__) from exc
     return {"messages": [reply]}
 
 
-def route_after_agent(state: AgentState) -> str:
+def route_after_agent(state: "AgentState") -> str:
     """
     CONDITIONAL EDGE: look at Gemini's latest reply.
     Did it request a tool? -> go to "tools". Otherwise -> END (it answered).
@@ -132,6 +156,8 @@ def run_agent(user_query: str, uploaded_receipt: Any = None) -> Dict[str, Any]:
             "tool_outputs": dict,         raw tool results (for debugging / UI)
         }
     """
+    if not AGENT_LIBRARIES_AVAILABLE:
+        return _run_fallback(user_query, uploaded_receipt, reason=f"agent libraries are not installed ({_IMPORT_ERROR.name})")
     if _get_llm_with_tools() is None:
         return _run_fallback(user_query, uploaded_receipt, reason="GEMINI_API_KEY is not set in SpendWise/.env")
 
@@ -146,18 +172,43 @@ def run_agent(user_query: str, uploaded_receipt: Any = None) -> Dict[str, Any]:
             HumanMessage(question),
         ],
     }
+    run_config = {
+        "recursion_limit": MAX_GRAPH_STEPS,
+        "max_concurrency": 1,  # run requested tools one after another, never at the same time
+    }
 
-    set_current_receipt(uploaded_receipt)
+    latest_state: Dict[str, Any] = initial_state
+    failure: Optional[str] = None
+    receipt_token = current_receipt.set(uploaded_receipt)
     try:
-        final_state = build_spendwise_graph().invoke(initial_state, {"recursion_limit": MAX_GRAPH_STEPS})
-    except Exception as exc:  # no internet, quota exceeded, wrong model name, endless loop ...
-        logger.warning("Gemini agent failed, using fallback: %r", exc)
-        return _run_fallback(user_query, uploaded_receipt, reason=f"Gemini is unavailable right now ({type(exc).__name__})")
+        # stream() hands us the state after every step, so if Gemini fails halfway
+        # we still know which tools already ran.
+        for latest_state in build_spendwise_graph().stream(initial_state, run_config, stream_mode="values"):
+            pass
+    except LLMUnavailableError as exc:
+        failure = f"Gemini is unavailable right now ({exc})"
+    except GraphRecursionError:
+        failure = "the agent needed too many steps for this request"
     finally:
-        set_current_receipt(None)
+        current_receipt.reset(receipt_token)
 
-    messages: List[BaseMessage] = final_state["messages"]
+    messages: List[BaseMessage] = latest_state["messages"]
     trace, selected_tools, tool_outputs = _build_trace(messages)
+
+    if failure:
+        logger.warning("Agent stopped early: %s", failure)
+        if not WRITE_TOOLS.intersection(selected_tools):
+            # Nothing was saved yet, so the fallback can safely handle the whole request.
+            return _run_fallback(user_query, uploaded_receipt, reason=failure)
+        # An expense was already saved: re-running the request would save it twice.
+        return {
+            "response": _partial_answer(failure),
+            "mode": "llm_partial",
+            "intent": "PLANNED_BY_LLM",
+            "selected_tools": selected_tools,
+            "reasoning_trace": trace,
+            "tool_outputs": tool_outputs,
+        }
 
     return {
         "response": _message_text(messages[-1]) or "Sorry, I couldn't produce an answer. Please try rephrasing.",
@@ -183,7 +234,17 @@ def _run_fallback(user_query: str, uploaded_receipt: Any, reason: str) -> Dict[s
     return result
 
 
-def _message_text(message: BaseMessage) -> str:
+def _partial_answer(failure: str) -> str:
+    """Explain a run that stopped after saving data, without repeating it."""
+    return (
+        f"> ⚠️ I started working on this, but {failure}, so I couldn't finish my answer.\n"
+        "> ✅ Your expense **was saved** — please don't add it again. "
+        "Open the trace below or the Transactions page to check it.\n\n"
+        "Ask me about your budget again in a minute."
+    )
+
+
+def _message_text(message: "BaseMessage") -> str:
     """Gemini may return text as a plain string or as a list of parts; join the text parts."""
     content = message.content
     if isinstance(content, str):
@@ -196,7 +257,7 @@ def _short(value: Any, limit: int = 300) -> str:
     return text if len(text) <= limit else text[:limit] + " …"
 
 
-def _build_trace(messages: List[BaseMessage]) -> Tuple[List[Dict[str, str]], List[str], Dict[str, Any]]:
+def _build_trace(messages: List["BaseMessage"]) -> Tuple[List[Dict[str, str]], List[str], Dict[str, Any]]:
     """
     Turn the message history into a readable step-by-step trace for the UI, showing
     what Gemini decided, what each tool returned, and when Gemini answered.
