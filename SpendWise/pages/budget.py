@@ -15,14 +15,14 @@ import pandas as pd
 
 from tools.budget_tool import get_all_budget_statuses
 from tools.database_tool import upsert_budget
-from utils.helpers import CATEGORIES, format_inr
+from utils.helpers import CATEGORIES, format_inr, period_label
 
 
 def render_budget_page() -> None:
     st.title("🎯 Monthly Budget Configuration")
-    st.caption("Define category-wise monthly budgets for October 2026 and monitor real-time utilization.")
+    st.caption(f"Define category-wise monthly budgets for {period_label()} and monitor real-time utilization.")
 
-    statuses = get_all_budget_statuses(month=10, year=2026)
+    statuses = get_all_budget_statuses()
 
     # -------------------------------------------------------------------------
     # 1. UPDATE CATEGORY BUDGET FORM
@@ -42,8 +42,8 @@ def render_budget_page() -> None:
                     )
             if st.form_submit_button("Save Monthly Budgets", type="primary"):
                 for cat, val in updated_values.items():
-                    upsert_budget(cat, val, month=10, year=2026)
-                st.success("Updated monthly budgets for October 2026!")
+                    upsert_budget(cat, val)
+                st.success(f"Updated monthly budgets for {period_label()}!")
                 st.rerun()
 
     st.divider()
@@ -51,7 +51,7 @@ def render_budget_page() -> None:
     # -------------------------------------------------------------------------
     # 2. BUDGET VS ACTUAL STATUS CARDS
     # -------------------------------------------------------------------------
-    st.markdown("#### Category Budget Status (October 2026)")
+    st.markdown(f"#### Category Budget Status ({period_label()})")
     grid_cols = st.columns(4)
     for idx, item in enumerate(statuses):
         col = grid_cols[idx % 4]
@@ -59,7 +59,7 @@ def render_budget_page() -> None:
         color = (
             "#DC2626"
             if status_text == "OVER BUDGET"
-            else ("#D97706" if status_text == "NEAR LIMIT" else "#16A34A")
+            else ("#D97706" if status_text == "NEAR LIMIT" else ("#64748B" if status_text == "NO BUDGET SET" else "#16A34A"))
         )
         with col:
             st.markdown(
@@ -101,7 +101,7 @@ def render_budget_page() -> None:
             for s in statuses
         ]
     )
-    st.dataframe(table_df, use_container_width=True, hide_index=True)
+    st.dataframe(table_df, width="stretch", hide_index=True)
 
 
 render_budget_page()

@@ -52,7 +52,7 @@ def render_assistant_page() -> None:
     triggered_prompt = None
     for idx, prompt_text in enumerate(EXAMPLE_PROMPTS[:6]):
         with btn_cols[idx % 3]:
-            if st.button(prompt_text, key=f"sample_q_{idx}", use_container_width=True):
+            if st.button(prompt_text, key=f"sample_q_{idx}", width="stretch"):
                 triggered_prompt = prompt_text
 
     st.divider()
@@ -69,23 +69,41 @@ def render_assistant_page() -> None:
                         st.markdown(f"**{step_info['step']}** — {step_info['detail']}")
 
     # -------------------------------------------------------------------------
+    # OPTIONAL RECEIPT ATTACHMENT (sent with the next message only)
+    # -------------------------------------------------------------------------
+    st.session_state.setdefault("receipt_upload_version", 0)
+    with st.expander("📎 Attach a receipt image to your next message (optional)"):
+        receipt = st.file_uploader(
+            "Receipt image",
+            type=["jpg", "jpeg", "png"],
+            key=f"assistant_receipt_{st.session_state['receipt_upload_version']}",
+            help="Then ask e.g. 'Add this receipt and tell me how much food budget is left'.",
+        )
+
+    # -------------------------------------------------------------------------
     # CHAT INPUT HANDLER
     # -------------------------------------------------------------------------
     user_input = st.chat_input("Ask SpendWise about your expenses, budgets, or receipts...")
     active_query = triggered_prompt or user_input
 
     if active_query:
-        st.session_state["chat_history"].append(
-            {"role": "user", "content": active_query, "trace": []}
+        with st.chat_message("user"):
+            st.markdown(active_query)
+        with st.spinner("SpendWise is thinking..."):
+            result = run_agent(active_query, uploaded_receipt=receipt)
+        # Save the question and its answer together, so a question is never left without an answer
+        st.session_state["chat_history"].extend(
+            [
+                {"role": "user", "content": active_query, "trace": []},
+                {
+                    "role": "assistant",
+                    "content": result["response"],
+                    "trace": result.get("reasoning_trace", []),
+                },
+            ]
         )
-        result = run_agent(active_query)
-        st.session_state["chat_history"].append(
-            {
-                "role": "assistant",
-                "content": result["response"],
-                "trace": result.get("reasoning_trace", []),
-            }
-        )
+        if receipt is not None:
+            st.session_state["receipt_upload_version"] += 1  # clear the uploader after use
         st.rerun()
 
 

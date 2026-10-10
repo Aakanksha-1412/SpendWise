@@ -49,6 +49,24 @@ def test_waits_and_retries_once_when_gemini_free_limit_is_hit(fake_gemini, monke
     assert fake.calls == 2
 
 
+def test_does_not_wait_when_the_daily_limit_is_used_up(fake_gemini, monkeypatch):
+    from langchain_google_genai.chat_models import GoogleRateLimitError
+    import agent.graph as graph
+
+    waits = []
+    monkeypatch.setattr(graph.time, "sleep", waits.append)
+    fake = fake_gemini([
+        GoogleRateLimitError("429 RESOURCE_EXHAUSTED quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier"),
+        gemini_says("never reached"),
+    ])
+
+    result = run_agent("how much food budget is left?")
+
+    assert waits == []
+    assert fake.calls == 1
+    assert result["mode"] == "fallback"
+
+
 def test_demo_mode_reports_the_current_month_not_october(no_gemini):
     from freezegun import freeze_time
     from agent.tools_registry import add_expense

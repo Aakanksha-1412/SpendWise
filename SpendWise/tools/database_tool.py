@@ -21,7 +21,8 @@ except ImportError:
     PANDAS_AVAILABLE = False
 
 from database.database import get_connection, init_db
-from utils.helpers import normalize_date, CATEGORIES
+from tools.categorization_tool import remember_merchant_category
+from utils.helpers import normalize_date, resolve_period, CATEGORIES
 
 
 def add_transaction(transaction: Dict[str, Any]) -> Dict[str, Any]:
@@ -67,6 +68,9 @@ def add_transaction(transaction: Dict[str, Any]) -> Dict[str, Any]:
     new_id = cursor.lastrowid
     conn.commit()
     conn.close()
+
+    # Teach ChromaDB semantic memory this merchant -> category (never blocks saving)
+    remember_merchant_category(merchant, category)
 
     return {
         "id": new_id,
@@ -142,11 +146,12 @@ def get_transactions_df() -> Any:
     return pd.DataFrame(records)
 
 
-def get_category_spending(category: str, month: int = 10, year: int = 2026) -> float:
+def get_category_spending(category: str, month: Optional[int] = None, year: Optional[int] = None) -> float:
     """
-    Calculate total spending for a specific category in a given month/year using Pandas
-    (with pure Python fallback if Pandas is not installed).
+    Calculate total spending for a specific category in a given month/year (default: this month)
+    using Pandas (with pure Python fallback if Pandas is not installed).
     """
+    month, year = resolve_period(month, year)
     if PANDAS_AVAILABLE:
         df = get_transactions_df()
         if df.empty:
@@ -173,30 +178,41 @@ def get_category_spending(category: str, month: int = 10, year: int = 2026) -> f
     return round(total, 2)
 
 
-def get_all_budgets(month: int = 10, year: int = 2026) -> Dict[str, float]:
+def get_all_budgets(month: Optional[int] = None, year: Optional[int] = None) -> Dict[str, float]:
     """
-    Retrieve monthly budget allocations for all categories for the specified month and year.
+    Retrieve monthly budget allocations for all categories for the given month (default: this month).
+    If a category has no budget saved for that month yet, its most recent earlier budget is
+    carried over (so a new month doesn't start with every budget at ₹0).
     """
+    month, year = resolve_period(month, year)
     init_db()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT category, monthly_budget FROM budgets WHERE month = ? AND year = ?",
-        (month, year),
+        """
+        SELECT category, monthly_budget FROM budgets
+        WHERE year * 12 + month <= ?
+        ORDER BY year * 12 + month DESC
+        """,
+        (year * 12 + month,),
     )
     rows = cursor.fetchall()
     conn.close()
 
     budget_map = {cat: 0.0 for cat in CATEGORIES}
-    for row in rows:
-        budget_map[row["category"]] = float(row["monthly_budget"])
+    found = set()
+    for row in rows:  # newest first: keep the first (latest) budget seen per category
+        if row["category"] in budget_map and row["category"] not in found:
+            budget_map[row["category"]] = float(row["monthly_budget"])
+            found.add(row["category"])
     return budget_map
 
 
-def upsert_budget(category: str, monthly_budget: float, month: int = 10, year: int = 2026) -> None:
+def upsert_budget(category: str, monthly_budget: float, month: Optional[int] = None, year: Optional[int] = None) -> None:
     """
-    Create or update the monthly budget for a given category.
+    Create or update the monthly budget for a given category (default: this month).
     """
+    month, year = resolve_period(month, year)
     init_db()
     conn = get_connection()
     cursor = conn.cursor()

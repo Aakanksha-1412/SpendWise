@@ -19,6 +19,14 @@ import database.database as database
 from agent import memory
 
 
+@pytest.fixture(scope="session", autouse=True)
+def test_chroma_dir(tmp_path_factory):
+    """Keep ChromaDB's learned merchants in a temporary folder, never in data/chroma_memory."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("CHROMA_PERSIST_DIR", str(tmp_path_factory.mktemp("chroma")))
+        yield
+
+
 @pytest.fixture(autouse=True)
 def fresh_db(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "spendwise_test.db"))

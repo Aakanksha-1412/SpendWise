@@ -17,6 +17,7 @@ Responsibility:
 """
 
 import streamlit as st
+from utils.helpers import period_label
 from database.database import init_db
 
 # Ensure SQLite tables and initial demo records exist before rendering any page
@@ -108,7 +109,7 @@ pg = st.navigation(pages)
 
 with st.sidebar:
     st.divider()
-    st.caption("**Active Period:** October 2026")
+    st.caption(f"**Active Period:** {period_label()}")
     st.caption("**Architecture:** LangGraph + SQLite3 + Pandas + OCR")
 
 pg.run()

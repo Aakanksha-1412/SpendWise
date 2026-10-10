@@ -54,9 +54,9 @@ def render_upload_page() -> None:
                     csv_df["source"] = "CSV"
 
                     st.markdown(f"**Preview ({len(csv_df)} rows detected):**")
-                    st.dataframe(csv_df.head(10), use_container_width=True, hide_index=True)
+                    st.dataframe(csv_df.head(10), width="stretch", hide_index=True)
 
-                    if st.button("Import CSV Transactions to SQLite", type="primary", use_container_width=True):
+                    if st.button("Import CSV Transactions to SQLite", type="primary", width="stretch"):
                         records = csv_df.to_dict(orient="records")
                         count = bulk_insert_transactions(records)
                         st.success(f"Successfully imported {count} transactions into SQLite!")
@@ -76,12 +76,12 @@ def render_upload_page() -> None:
             key="receipt_uploader",
         )
 
-        if st.button("Run Demo Receipt Extraction (No File Needed)", use_container_width=True):
+        if st.button("Run Demo Receipt Extraction (No File Needed)", width="stretch"):
             st.session_state["ocr_result"] = extract_receipt(None, filename_hint="starbucks_receipt.jpg")
 
         if uploaded_image is not None:
             st.image(uploaded_image, caption="Uploaded Receipt Image", width=260)
-            if st.button("Extract Receipt via OCR Tool", type="primary", use_container_width=True):
+            if st.button("Extract Receipt via OCR Tool", type="primary", width="stretch"):
                 st.session_state["ocr_result"] = extract_receipt(
                     uploaded_image, filename_hint=uploaded_image.name
                 )

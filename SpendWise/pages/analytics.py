@@ -26,7 +26,7 @@ from analytics.analytics import (
     get_spending_trends_df,
 )
 from tools.spike_detector import detect_all_category_spikes
-from utils.helpers import format_inr, CATEGORY_COLORS
+from utils.helpers import format_inr, CATEGORY_COLORS, period_label
 
 
 def render_analytics_page() -> None:
@@ -63,8 +63,8 @@ def render_analytics_page() -> None:
     # -------------------------------------------------------------------------
     row1_col1, row1_col2 = st.columns(2, gap="large")
 
-    cat_df = get_category_spending_df(month=10, year=2026)
-    bva_df = get_budget_vs_actual_df(month=10, year=2026)
+    cat_df = get_category_spending_df()
+    bva_df = get_budget_vs_actual_df()
 
     with row1_col1:
         st.markdown("#### 1. Category-Wise Spending Distribution")
@@ -77,7 +77,7 @@ def render_analytics_page() -> None:
             color_discrete_map=CATEGORY_COLORS,
         )
         fig_pie.update_layout(height=350, margin=dict(l=10, r=10, t=20, b=10))
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig_pie, width="stretch")
 
     with row1_col2:
         st.markdown("#### 2. Budget vs Actual Spending")
@@ -94,7 +94,7 @@ def render_analytics_page() -> None:
             margin=dict(l=10, r=10, t=20, b=10),
             legend=dict(orientation="h", y=1.08),
         )
-        st.plotly_chart(fig_bva, use_container_width=True)
+        st.plotly_chart(fig_bva, width="stretch")
 
     st.divider()
 
@@ -131,7 +131,7 @@ def render_analytics_page() -> None:
             margin=dict(l=10, r=10, t=20, b=10),
             legend=dict(orientation="h", y=1.08),
         )
-        st.plotly_chart(fig_wk, use_container_width=True)
+        st.plotly_chart(fig_wk, width="stretch")
 
     with row2_col2:
         st.markdown("#### 4. Monthly Spending Overview")
@@ -147,15 +147,15 @@ def render_analytics_page() -> None:
             margin=dict(l=10, r=10, t=20, b=10),
             yaxis_title="Total Spend (₹)",
         )
-        st.plotly_chart(fig_mo, use_container_width=True)
+        st.plotly_chart(fig_mo, width="stretch")
 
     st.divider()
 
     # -------------------------------------------------------------------------
     # 5. SPENDING TRENDS (DAILY & CUMULATIVE)
     # -------------------------------------------------------------------------
-    st.markdown("#### 5. October 2026 Daily & Cumulative Spending Trend")
-    trend_df = get_spending_trends_df(month=10, year=2026)
+    st.markdown(f"#### 5. {period_label()} Daily & Cumulative Spending Trend")
+    trend_df = get_spending_trends_df()
     if not trend_df.empty:
         fig_trend = go.Figure()
         fig_trend.add_trace(
@@ -180,7 +180,7 @@ def render_analytics_page() -> None:
             margin=dict(l=10, r=10, t=20, b=10),
             legend=dict(orientation="h", y=1.08),
         )
-        st.plotly_chart(fig_trend, use_container_width=True)
+        st.plotly_chart(fig_trend, width="stretch")
 
 
 render_analytics_page()

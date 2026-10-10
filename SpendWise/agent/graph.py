@@ -133,8 +133,9 @@ def agent_node(state: "AgentState") -> "AgentState":
         try:
             return {"messages": [llm.invoke(state["messages"])]}
         except ModelRateLimitError as exc:
-            # Free tier = 5 requests/minute. Wait once and retry before giving up.
-            if attempt == 2:
+            # Free tier = 5 requests/minute: wait once and retry. A used-up DAILY limit
+            # won't recover in seconds, so give up straight away.
+            if attempt == 2 or "PerDay" in str(exc):
                 raise LLMUnavailableError(type(exc).__name__) from exc
             time.sleep(RATE_LIMIT_WAIT_SECONDS)
         except Exception as exc:  # only errors from talking to Gemini are treated as "unavailable"

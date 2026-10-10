@@ -15,7 +15,7 @@ Responsibility:
 """
 
 from __future__ import annotations
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 
 try:
     import pandas as pd
@@ -27,10 +27,10 @@ except ImportError:
 from tools.database_tool import get_transactions_df
 from tools.budget_tool import get_all_budget_statuses, suggest_discretionary_reallocation
 from tools.spike_detector import detect_all_category_spikes
-from utils.helpers import CATEGORIES
+from utils.helpers import CATEGORIES, resolve_period
 
 
-def get_summary_metrics(month: int = 10, year: int = 2026) -> Dict[str, Any]:
+def get_summary_metrics(month: Optional[int] = None, year: Optional[int] = None) -> Dict[str, Any]:
     """
     Compute top-level dashboard KPI summary cards for the active month/year.
     """
@@ -54,7 +54,7 @@ def get_summary_metrics(month: int = 10, year: int = 2026) -> Dict[str, Any]:
     }
 
 
-def get_budget_vs_actual_df(month: int = 10, year: int = 2026) -> pd.DataFrame:
+def get_budget_vs_actual_df(month: Optional[int] = None, year: Optional[int] = None) -> pd.DataFrame:
     """
     Return a Pandas DataFrame with columns:
     [Category, Budget, Spent, Remaining, Utilization_Pct, Status]
@@ -75,7 +75,7 @@ def get_budget_vs_actual_df(month: int = 10, year: int = 2026) -> pd.DataFrame:
     return df
 
 
-def get_category_spending_df(month: int = 10, year: int = 2026) -> pd.DataFrame:
+def get_category_spending_df(month: Optional[int] = None, year: Optional[int] = None) -> pd.DataFrame:
     """
     Return category-wise actual spending sorted descending for pie/bar visualizations.
     """
@@ -124,10 +124,11 @@ def get_monthly_spending_df() -> pd.DataFrame:
     return grouped[["Month", "Total_Spent"]]
 
 
-def get_spending_trends_df(month: int = 10, year: int = 2026) -> pd.DataFrame:
+def get_spending_trends_df(month: Optional[int] = None, year: Optional[int] = None) -> pd.DataFrame:
     """
     Compute daily spending and cumulative monthly spending trend for the active month.
     """
+    month, year = resolve_period(month, year)
     df = get_transactions_df()
     if df.empty:
         return pd.DataFrame(columns=["Date", "Daily_Spent", "Cumulative_Spent"])
@@ -150,7 +151,7 @@ def get_spending_trends_df(month: int = 10, year: int = 2026) -> pd.DataFrame:
     return daily[["Date", "Daily_Spent", "Cumulative_Spent"]]
 
 
-def get_dashboard_ai_insights(month: int = 10, year: int = 2026) -> Dict[str, Any]:
+def get_dashboard_ai_insights(month: Optional[int] = None, year: Optional[int] = None) -> Dict[str, Any]:
     """
     Combine budget overrun alerts, discretionary reallocation recommendations,
     and weekly spike detections into a structured insights dictionary for the UI.

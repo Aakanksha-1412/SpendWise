@@ -9,15 +9,21 @@ Responsibility:
   based on merchant name and transaction description.
 - Parses natural language expense strings (e.g., "Spent 450 on Swiggy for dinner")
   into structured transaction dictionaries.
-- INTEGRATION POINT: ChromaDB semantic similarity search over historical merchant
-  embeddings + LLM fallback for unseen merchants.
+- Semantic memory (ChromaDB): when the keyword list doesn't know a merchant, ChromaDB
+  finds the category by MEANING (e.g. "Chai Point" ~ tea/coffee -> Food), and it learns
+  every merchant -> category pair the user saves (see `remember_merchant_category`).
+  Runs locally (no API key); stored in CHROMA_PERSIST_DIR (default data/chroma_memory).
 """
 
+import logging
+import os
 import re
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 
 from utils.helpers import CATEGORIES
+
+logger = logging.getLogger(__name__)
 
 # Deterministic keyword taxonomy for fast, zero-latency baseline categorization
 MERCHANT_CATEGORY_KEYWORDS: Dict[str, list[str]] = {
@@ -55,14 +61,38 @@ MERCHANT_CATEGORY_KEYWORDS: Dict[str, list[str]] = {
 }
 
 
+# Plain-language descriptions of each category. ChromaDB compares a merchant's name with
+# these by meaning, so unseen merchants with a meaningful name still get a category.
+CATEGORY_DESCRIPTIONS: Dict[str, list[str]] = {
+    "Food": [
+        "restaurant meal dinner lunch breakfast", "tea chai coffee cafe snacks bakery",
+        "biryani pizza burger dosa thali food", "groceries vegetables fruits supermarket",
+        "food delivery order",
+    ],
+    "Transport": ["taxi cab auto rickshaw ride", "bus train metro ticket", "petrol diesel fuel", "flight airline travel"],
+    "Shopping": [
+        "clothes shoes fashion apparel", "electronics gadgets phone laptop", "online shopping order",
+        "glasses spectacles watch accessories", "cosmetics beauty makeup",
+    ],
+    "Entertainment": ["movie cinema film tickets", "music video streaming subscription", "video games gaming", "concert event party"],
+    "Bills": ["electricity water gas bill", "mobile recharge internet broadband", "house rent maintenance", "insurance premium"],
+    "Healthcare": ["doctor clinic hospital", "medicine pharmacy chemist", "gym fitness workout", "dental eye checkup lab test"],
+    "Education": ["online course learning classes", "college fees tuition exam", "coaching test preparation", "textbooks study material"],
+}
+
+# Cosine distance: 0 = same meaning, 1 = unrelated. Above this, the match isn't trusted
+# and the expense stays "Others" (e.g. "XYZ Traders" has no meaningful words).
+SEMANTIC_MATCH_MAX_DISTANCE = 0.72
+_PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_open_memories: Dict[str, Any] = {}
+
+
 def categorize_expense(merchant: str, description: str = "") -> str:
     """
-    Categorize an expense based on merchant name and description.
-
-    FUTURE INTEGRATION POINT (ChromaDB + LLM):
-    1. Query ChromaDB collection `merchant_categories` for nearest semantic match.
-    2. If distance > threshold, invoke LLM classifier with `CATEGORIES`.
-    3. Fallback to deterministic keyword lookup below.
+    Categorize an expense based on merchant name and description:
+    1. Fast keyword lookup (MERCHANT_CATEGORY_KEYWORDS).
+    2. If no keyword matches: ChromaDB semantic memory (learned merchants + category descriptions).
+    3. Otherwise "Others".
     """
     combined_text = f"{merchant} {description}".lower().strip()
 
@@ -71,7 +101,77 @@ def categorize_expense(merchant: str, description: str = "") -> str:
             if kw in combined_text:
                 return category
 
-    return "Others"
+    return semantic_category(merchant, description) or "Others"
+
+
+def _merchant_memory():
+    """Open the ChromaDB collection once (seeding the category descriptions). None if unavailable."""
+    path = os.getenv("CHROMA_PERSIST_DIR") or os.path.join("data", "chroma_memory")
+    if not os.path.isabs(path):
+        path = os.path.join(_PROJECT_DIR, path)
+    if path not in _open_memories:
+        try:
+            import chromadb
+            from chromadb.config import Settings
+
+            client = chromadb.PersistentClient(path=path, settings=Settings(anonymized_telemetry=False))
+            collection = client.get_or_create_collection("merchant_categories", metadata={"hnsw:space": "cosine"})
+            entries = [(cat, i, text) for cat, texts in CATEGORY_DESCRIPTIONS.items() for i, text in enumerate(texts)]
+            collection.upsert(
+                ids=[f"description:{cat}:{i}" for cat, i, _ in entries],
+                documents=[text for _, _, text in entries],
+                metadatas=[{"category": cat, "kind": "description"} for cat, _, _ in entries],
+            )
+            _open_memories[path] = collection
+        except Exception as exc:  # ChromaDB missing, model download failed, disk problem ...
+            logger.warning("ChromaDB merchant memory unavailable, using keywords only: %r", exc)
+            _open_memories[path] = None
+    return _open_memories[path]
+
+
+def semantic_category(merchant: str, description: str = "") -> Optional[str]:
+    """Closest category by meaning, or None if ChromaDB isn't sure (or isn't available)."""
+    memory = _merchant_memory()
+    queries = [text for text in dict.fromkeys([merchant.strip(), f"{merchant} {description}".strip()]) if text]
+    if memory is None or not queries:
+        return None
+    try:
+        result = memory.query(query_texts=queries, n_results=1)
+    except Exception as exc:
+        logger.warning("ChromaDB query failed: %r", exc)
+        return None
+    best = min(
+        (
+            (distances[0], metadatas[0]["category"])
+            for distances, metadatas in zip(result["distances"], result["metadatas"])
+            if distances
+        ),
+        default=None,
+    )
+    if best is None or best[0] > SEMANTIC_MATCH_MAX_DISTANCE:
+        return None
+    return best[1]
+
+
+def remember_merchant_category(merchant: str, category: str) -> None:
+    """
+    Teach the semantic memory that `merchant` belongs to `category` (called whenever an
+    expense is saved), so the same or similar merchants are recognised next time.
+    """
+    name = (merchant or "").strip()
+    if not name or category not in CATEGORIES or category == "Others":
+        return
+    memory = _merchant_memory()
+    if memory is None:
+        return
+    try:
+        memory.upsert(
+            ids=[f"merchant:{name.lower()}"],
+            documents=[name],
+            metadatas=[{"category": category, "kind": "learned"}],
+        )
+    except Exception as exc:
+        logger.warning("ChromaDB could not remember %r: %r", name, exc)
 
 
 def parse_natural_language_expense(user_text: str) -> Dict[str, Any]:
