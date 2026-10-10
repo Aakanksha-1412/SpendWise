@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.tools import tool
 
 from analytics.analytics import get_summary_metrics
+from agent.period import this_month
 from tools.budget_tool import (
     calculate_budget_status,
     get_all_budget_statuses,
@@ -34,7 +35,7 @@ from tools.categorization_tool import categorize_expense
 from tools.database_tool import add_transaction, get_transactions
 from tools.ocr_tool import extract_receipt
 from tools.spike_detector import detect_all_category_spikes, detect_spending_spike
-from utils.helpers import CATEGORIES
+from utils.helpers import CATEGORIES, normalize_date, to_iso_date
 
 # ------------------------------------------------------------------------------
 # Receipt hand-off
@@ -48,11 +49,6 @@ current_receipt: ContextVar[Any] = ContextVar("current_receipt", default=None)
 # ------------------------------------------------------------------------------
 # Argument checks (the LLM may write "food", "groceries", -300 ...)
 # ------------------------------------------------------------------------------
-def _this_month() -> Dict[str, int]:
-    now = datetime.now()
-    return {"month": now.month, "year": now.year}
-
-
 def _match_category(category: Optional[str]) -> Tuple[Optional[str], Optional[Dict[str, str]]]:
     """Return (official category name, None) or (None, error for the LLM)."""
     wanted = (category or "").strip().lower()
@@ -77,21 +73,21 @@ def get_budget_status(category: str) -> Dict[str, Any]:
     official, error = _match_category(category)
     if error:
         return error
-    return calculate_budget_status(official, **_this_month())
+    return calculate_budget_status(official, **this_month())
 
 
 @tool
 def get_all_budgets_overview() -> List[Dict[str, Any]]:
     """Get budget vs spending status for ALL 8 categories this month.
     Use to find which categories are over budget, or to explain why a budget alert was raised."""
-    return get_all_budget_statuses(**_this_month())
+    return get_all_budget_statuses(**this_month())
 
 
 @tool
 def get_monthly_summary() -> Dict[str, Any]:
     """Get the overall picture for this month: total spent, total monthly budget,
     remaining budget and number of active alerts. Use for general "how am I doing?" questions."""
-    return get_summary_metrics(**_this_month())
+    return get_summary_metrics(**this_month())
 
 
 @tool
@@ -99,7 +95,7 @@ def get_saving_suggestions() -> Dict[str, Any]:
     """Find categories that are OVER budget and discretionary categories that still have
     unused budget, with ready-made suggestions on where to cut back.
     Use for "where can I reduce spending?" or "how do I fix my shopping overspend?"."""
-    return suggest_discretionary_reallocation(**_this_month())
+    return suggest_discretionary_reallocation(**this_month())
 
 
 @tool
@@ -133,6 +129,7 @@ def search_transactions(
         if error:
             return [error]
     rows = get_transactions(category=category, merchant_query=merchant)
+    rows.sort(key=lambda row: (to_iso_date(row["date"]), row["id"]), reverse=True)  # newest date first
     return rows[: max(1, min(limit, 50))]
 
 
@@ -148,7 +145,7 @@ def check_affordability(category: str, amount: float) -> Dict[str, Any]:
         return {"error": "Amount must be greater than 0."}
     # Simple deterministic maths so the LLM never has to calculate.
     # (Could move into tools/budget_tool.py later — ask Member 3.)
-    status = calculate_budget_status(official, **_this_month())
+    status = calculate_budget_status(official, **this_month())
     left_after = round(status["remaining"] - amount, 2)
     return {
         "category": status["category"],
@@ -191,6 +188,12 @@ def add_expense(
         return {**error, "saved": False}
     if amount <= 0:
         return {"error": "Amount must be greater than 0. Ask the user for the correct amount.", "saved": False}
+    if date:
+        date = normalize_date(date)
+        try:
+            datetime.strptime(date, "%d-%m-%Y")
+        except ValueError:
+            return {"error": f"Could not read date '{date}'. Use DD-MM-YYYY (today is in your instructions).", "saved": False}
 
     saved = add_transaction(
         {
@@ -205,7 +208,7 @@ def add_expense(
     return {
         "saved": True,
         "transaction": saved,
-        "budget_after_saving": calculate_budget_status(official, **_this_month()),
+        "budget_after_saving": calculate_budget_status(official, **this_month()),
     }
 
 
@@ -237,7 +240,3 @@ ALL_TOOLS = [
     add_expense,
     read_uploaded_receipt,
 ]
-
-# Tools that change data. If one of these already ran, the agent must not re-run the
-# request through the fallback (that would save the same expense twice).
-WRITE_TOOLS = {"add_expense"}

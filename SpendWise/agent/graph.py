@@ -27,6 +27,7 @@ Public interface (used by `pages/assistant.py`):
 import json
 import logging
 import os
+import time
 from datetime import datetime
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
@@ -37,6 +38,7 @@ from agent.fallback_agent import run_fallback_agent
 # runs using the fallback agent (see `run_agent`).
 try:
     from dotenv import dotenv_values
+    from langchain_core.exceptions import ModelRateLimitError
     from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
     from langgraph.errors import GraphRecursionError
     from langgraph.graph import END, START, StateGraph
@@ -44,7 +46,7 @@ try:
 
     from agent.prompts import ORCHESTRATOR_SYSTEM_PROMPT
     from agent.state import AgentState
-    from agent.tools_registry import ALL_TOOLS, WRITE_TOOLS, current_receipt
+    from agent.tools_registry import ALL_TOOLS, current_receipt
 
     AGENT_LIBRARIES_AVAILABLE = True
 except ImportError as import_error:  # pragma: no cover - depends on the environment
@@ -57,6 +59,8 @@ ENV_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 DEFAULT_MODEL = "gemini-3.8-flash"
 # Safety net: stop if the agent <-> tools loop runs more than this many steps.
 MAX_GRAPH_STEPS = 12
+# On a rate-limit error (free tier: 5 requests/minute), wait this long and retry once.
+RATE_LIMIT_WAIT_SECONDS = 15
 
 
 class LLMUnavailableError(Exception):
@@ -68,9 +72,22 @@ class LLMUnavailableError(Exception):
 # ==============================================================================
 def _setting(name: str, default: str = "") -> str:
     """Read a setting from real environment variables, else from SpendWise/.env.
-    Re-read on every request, so editing .env takes effect without restarting."""
-    value = os.getenv(name) or dotenv_values(ENV_FILE_PATH).get(name) or default
+    Editing .env takes effect without restarting the app."""
+    value = os.getenv(name) or _env_file_values(ENV_FILE_PATH, _modified_time(ENV_FILE_PATH)).get(name) or default
     return value.strip()
+
+
+def _modified_time(path: str) -> float:
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
+@lru_cache(maxsize=2)
+def _env_file_values(path: str, modified_time: float) -> Dict[str, Optional[str]]:
+    """Parse .env once per version of the file (a new modified time = re-read)."""
+    return dotenv_values(path)
 
 
 def _get_llm_with_tools():
@@ -108,11 +125,16 @@ def agent_node(state: "AgentState") -> "AgentState":
     llm = _get_llm_with_tools()
     if llm is None:
         raise LLMUnavailableError("GEMINI_API_KEY is not set")
-    try:
-        reply = llm.invoke(state["messages"])
-    except Exception as exc:  # only errors from talking to Gemini are treated as "unavailable"
-        raise LLMUnavailableError(type(exc).__name__) from exc
-    return {"messages": [reply]}
+    for attempt in (1, 2):
+        try:
+            return {"messages": [llm.invoke(state["messages"])]}
+        except ModelRateLimitError as exc:
+            # Free tier = 5 requests/minute. Wait once and retry before giving up.
+            if attempt == 2:
+                raise LLMUnavailableError(type(exc).__name__) from exc
+            time.sleep(RATE_LIMIT_WAIT_SECONDS)
+        except Exception as exc:  # only errors from talking to Gemini are treated as "unavailable"
+            raise LLMUnavailableError(type(exc).__name__) from exc
 
 
 def route_after_agent(state: "AgentState") -> str:
@@ -126,13 +148,18 @@ def route_after_agent(state: "AgentState") -> str:
     return END
 
 
+def tool_error_message(error: Exception) -> str:
+    """If a tool crashes, give Gemini an error result to explain, instead of crashing the page."""
+    return f"Error: this tool failed ({type(error).__name__}: {error}). Tell the user it didn't work; don't guess the numbers."
+
+
 @lru_cache(maxsize=1)
 def build_spendwise_graph():
     """Draw the flowchart once and compile it into a runnable agent."""
     graph = StateGraph(AgentState)
 
     graph.add_node("agent", agent_node)            # Gemini thinks / decides
-    graph.add_node("tools", ToolNode(ALL_TOOLS))   # LangGraph runs the requested Python tools
+    graph.add_node("tools", ToolNode(ALL_TOOLS, handle_tool_errors=tool_error_message))  # runs the requested Python tools
 
     graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", route_after_agent, ["tools", END])
@@ -197,7 +224,10 @@ def run_agent(user_query: str, uploaded_receipt: Any = None) -> Dict[str, Any]:
 
     if failure:
         logger.warning("Agent stopped early: %s", failure)
-        if not WRITE_TOOLS.intersection(selected_tools):
+        saved_something = any(
+            isinstance(output, dict) and output.get("saved") is True for output in tool_outputs.values()
+        )
+        if not saved_something:
             # Nothing was saved yet, so the fallback can safely handle the whole request.
             return _run_fallback(user_query, uploaded_receipt, reason=failure)
         # An expense was already saved: re-running the request would save it twice.

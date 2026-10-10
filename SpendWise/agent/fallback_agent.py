@@ -15,6 +15,7 @@ Responsibility:
 import re
 from typing import Dict, Any, List
 
+from agent.period import this_month, this_month_label
 from agent.state import AgentState
 from tools.ocr_tool import extract_receipt
 from tools.categorization_tool import parse_natural_language_expense, categorize_expense
@@ -223,13 +224,13 @@ def call_tool_node(state: AgentState) -> AgentState:
                     target_cat = saved_tx["category"]
 
         elif tool_name == "budget_tool.calculate_budget_status":
-            outputs["category_budget_status"] = calculate_budget_status(target_cat)
+            outputs["category_budget_status"] = calculate_budget_status(target_cat, **this_month())
 
         elif tool_name == "budget_tool.get_all_budget_statuses":
-            outputs["all_budget_statuses"] = get_all_budget_statuses()
+            outputs["all_budget_statuses"] = get_all_budget_statuses(**this_month())
 
         elif tool_name == "budget_tool.suggest_discretionary_reallocation":
-            outputs["reallocation_plan"] = suggest_discretionary_reallocation()
+            outputs["reallocation_plan"] = suggest_discretionary_reallocation(**this_month())
 
         elif tool_name == "spike_detector.detect_all_category_spikes":
             outputs["all_spikes"] = detect_all_category_spikes()
@@ -239,7 +240,7 @@ def call_tool_node(state: AgentState) -> AgentState:
             outputs["category_spike"] = detect_spending_spike(target_cat)
 
         elif tool_name == "analytics.get_summary_metrics":
-            outputs["summary_metrics"] = get_summary_metrics()
+            outputs["summary_metrics"] = get_summary_metrics(**this_month())
 
         elif tool_name == "database_tool.get_transactions":
             # Biggest purchases in the first over-budget category (real SQLite rows)
@@ -359,7 +360,7 @@ def generate_response_node(state: AgentState) -> AgentState:
         spike = outputs.get("category_spike", {})
         cat_name = b_stat.get("category", "Food")
         response = (
-            f"### {cat_name} Spending & Budget Summary (October 2026)\n\n"
+            f"### {cat_name} Spending & Budget Summary ({this_month_label()})\n\n"
             f"- **Monthly Budget:** {format_inr(b_stat.get('budget', 0))}\n"
             f"- **Actual Spent:** **{format_inr(b_stat.get('spent', 0))}** ({b_stat.get('utilization_pct', 0)}% used)\n"
             f"- **Remaining Budget:** **{format_inr(b_stat.get('remaining', 0))}**\n"
@@ -457,8 +458,8 @@ def generate_response_node(state: AgentState) -> AgentState:
         response = "\n".join(lines)
 
     else:
-        summary = outputs.get("summary_metrics", get_summary_metrics())
-        reallocation = outputs.get("reallocation_plan", suggest_discretionary_reallocation())
+        summary = outputs.get("summary_metrics", get_summary_metrics(**this_month()))
+        reallocation = outputs.get("reallocation_plan", suggest_discretionary_reallocation(**this_month()))
         alert_parts = [
             f"{c['category']} over budget by {format_inr(abs(c['remaining']))}"
             for c in reallocation.get("over_budget_categories", [])
@@ -468,7 +469,7 @@ def generate_response_node(state: AgentState) -> AgentState:
             if s["spike_detected"]
         ]
         response = (
-            f"### SpendWise Financial Overview (October 2026)\n\n"
+            f"### SpendWise Financial Overview ({this_month_label()})\n\n"
             f"- **Total Monthly Budget:** {format_inr(summary['monthly_budget'])}\n"
             f"- **Total Spent So Far:** **{format_inr(summary['total_spent'])}**\n"
             f"- **Remaining Overall Budget:** **{format_inr(summary['remaining_budget'])}**\n"
