@@ -30,9 +30,11 @@ class FakeGemini:
     def __init__(self, script):
         self.script = list(script)
         self.calls = 0
+        self.received = []  # the message lists we sent to "Gemini", one per call
 
     def invoke(self, messages):
         self.calls += 1
+        self.received.append(list(messages))
         step = self.script.pop(0)
         if isinstance(step, Exception):
             raise step

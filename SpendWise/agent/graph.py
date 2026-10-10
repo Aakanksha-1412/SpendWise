@@ -21,7 +21,8 @@ Responsibility:
   falls back to the keyword-based demo agent in `agent/fallback_agent.py`.
 
 Public interface (used by `pages/assistant.py`):
-    run_agent(user_query, uploaded_receipt=None) -> dict
+    run_agent(user_query, uploaded_receipt=None, chat_history=None) -> dict
+    `chat_history` gives the agent short-term memory of the current chat.
 """
 
 import json
@@ -59,6 +60,8 @@ ENV_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 DEFAULT_MODEL = "gemini-3.8-flash"
 # Safety net: stop if the agent <-> tools loop runs more than this many steps.
 MAX_GRAPH_STEPS = 12
+# Short-term memory: how many earlier chat messages Gemini sees (fewer = less data sent to Google).
+MAX_HISTORY_MESSAGES = 6
 # On a rate-limit error (free tier: 5 requests/minute), wait this long and retry once.
 RATE_LIMIT_WAIT_SECONDS = 15
 
@@ -171,9 +174,19 @@ def build_spendwise_graph():
 # ==============================================================================
 # 3. PUBLIC ENTRY POINT
 # ==============================================================================
-def run_agent(user_query: str, uploaded_receipt: Any = None) -> Dict[str, Any]:
+def run_agent(
+    user_query: str,
+    uploaded_receipt: Any = None,
+    chat_history: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """
-    Called by `pages/assistant.py`. Runs the Gemini agent and returns:
+    Called by `pages/assistant.py`.
+
+    chat_history (optional): the earlier messages of this chat, in the Assistant page's
+    format [{"role": "user" | "assistant", "content": str, ...}], so follow-ups like
+    "yes, log it" make sense.
+
+    Runs the Gemini agent and returns:
         {
             "response": str,              final answer (Markdown)
             "mode": "llm" | "fallback",
@@ -196,6 +209,7 @@ def run_agent(user_query: str, uploaded_receipt: Any = None) -> Dict[str, Any]:
         "user_query": user_query,
         "messages": [
             SystemMessage(ORCHESTRATOR_SYSTEM_PROMPT.format(today=datetime.now().strftime("%d %B %Y"))),
+            *_history_messages(chat_history, user_query),
             HumanMessage(question),
         ],
     }
@@ -220,7 +234,8 @@ def run_agent(user_query: str, uploaded_receipt: Any = None) -> Dict[str, Any]:
         current_receipt.reset(receipt_token)
 
     messages: List[BaseMessage] = latest_state["messages"]
-    trace, selected_tools, tool_outputs = _build_trace(messages)
+    # Trace only what happened for THIS question (skip system rules, chat history, question).
+    trace, selected_tools, tool_outputs = _build_trace(messages[len(initial_state["messages"]):])
 
     if failure:
         logger.warning("Agent stopped early: %s", failure)
@@ -272,6 +287,20 @@ def _partial_answer(failure: str) -> str:
         "Open the trace below or the Transactions page to check it.\n\n"
         "Ask me about your budget again in a minute."
     )
+
+
+def _history_messages(chat_history: Optional[List[Dict[str, Any]]], user_query: str) -> List["BaseMessage"]:
+    """Turn the Assistant page's chat history into messages Gemini understands."""
+    earlier = list(chat_history or [])
+    if earlier and earlier[-1].get("role") == "user" and earlier[-1].get("content") == user_query:
+        earlier.pop()  # the page already added the current question; it's sent separately
+    messages: List[BaseMessage] = []
+    for entry in earlier[-MAX_HISTORY_MESSAGES:]:
+        if entry.get("role") == "user":
+            messages.append(HumanMessage(entry["content"]))
+        elif entry.get("role") == "assistant":
+            messages.append(AIMessage(entry["content"]))
+    return messages
 
 
 def _message_text(message: "BaseMessage") -> str:
