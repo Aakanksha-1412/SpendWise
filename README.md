@@ -1,20 +1,23 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# SPENDWISE
 
-# Run and deploy your AI Studio app
+**Autonomous Personal Financial Expense & Budgeting Assistant**
 
-This contains everything you need to run your app locally.
+The entire project lives in the [`SpendWise/`](SpendWise/) folder (Python + Streamlit + LangGraph).
+See [`SpendWise/README.md`](SpendWise/README.md) for architecture, team ownership and setup.
 
-View your app in AI Studio: https://ai.studio/apps/0e4a218f-e19e-4d56-b05c-dda849306fdc
+## Quick start
 
-## Run Locally
+```bash
+cd SpendWise
+python -m venv .venv
+.venv\Scripts\activate        # Windows  (macOS/Linux: source .venv/bin/activate)
+pip install -r requirements.txt
+streamlit run app.py          # opens http://localhost:8501
+```
 
-**Prerequisites:**  Node.js
+## Team workflow
 
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+1. `git pull origin main` before you start work.
+2. Work on your own branch: `git checkout -b feature/<your-module>`.
+3. Only edit the files your role owns (see the ownership table in `SpendWise/README.md`).
+4. Push your branch and open a Pull Request. Never push directly to `main`.

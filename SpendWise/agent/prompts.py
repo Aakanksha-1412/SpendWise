@@ -1,7 +1,7 @@
 """
 SpendWise — Agent System Prompts & Instructions
 ===============================================
-Owner: Team Member 1 (Agent / LangGraph)
+Owner: Member 1 (AI Agent / LangGraph)
 
 Responsibility:
 - Centralizes all LLM system prompts for:

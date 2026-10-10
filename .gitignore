@@ -1,8 +1,17 @@
-node_modules/
-build/
-dist/
-coverage/
-.DS_Store
-*.log
-.env*
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets — never commit API keys
+.env
+.env.*
 !.env.example
+
+# Local tool / editor folders
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

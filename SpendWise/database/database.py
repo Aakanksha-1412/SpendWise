@@ -1,7 +1,7 @@
 """
 SpendWise — SQLite Database Connection & Initialization
 =======================================================
-Owner: Team Member 3 (Database + Transactions)
+Owner: Member 2 (Database + Categorization)
 
 Responsibility:
 - Manages the SQLite3 database connection (`spendwise.db`).

@@ -1,7 +1,7 @@
 """
 SpendWise — Transactions Page
 =============================
-Owner: UI / Frontend Team (Consuming `tools/database_tool.py` & `tools/categorization_tool.py`)
+Owner: Member 4 (Streamlit UI) — consumes `tools/database_tool.py` & `tools/categorization_tool.py` (Member 2)
 
 Responsibility:
 - Displays the searchable, filterable table of all recorded transactions:

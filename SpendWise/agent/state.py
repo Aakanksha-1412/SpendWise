@@ -1,7 +1,7 @@
 """
 SpendWise — LangGraph Agent State Schema
 ========================================
-Owner: Team Member 1 (Agent / LangGraph)
+Owner: Member 1 (AI Agent / LangGraph)
 
 Responsibility:
 - Defines the strongly-typed state (`AgentState`) passed between nodes in the

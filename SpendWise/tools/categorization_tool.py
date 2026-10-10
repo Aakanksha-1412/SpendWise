@@ -1,7 +1,7 @@
 """
 SpendWise — Expense Categorization & Natural Language Parsing Tool
 ==================================================================
-Owner: Team Member 1 (Agent / Categorization) & Team Member 2 (OCR / Extraction)
+Owner: Member 2 (Database + Categorization)
 
 Responsibility:
 - Automatically assigns one of the 8 official categories (`Food`, `Transport`,

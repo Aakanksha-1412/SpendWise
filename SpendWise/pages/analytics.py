@@ -1,7 +1,7 @@
 """
 SpendWise — Financial Analytics & Spike Detection Page
 ======================================================
-Owner: UI / Frontend Team & Team Member 4 (Analytics + Spike Detection)
+Owner: Member 4 (Streamlit UI) — consumes `analytics/` & `tools/spike_detector.py` (Member 3)
 
 Responsibility:
 - Renders the 6 required analytical views using Plotly and Pandas DataFrames

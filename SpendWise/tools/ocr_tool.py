@@ -1,7 +1,7 @@
 """
 SpendWise — Receipt OCR & Structured Extraction Tool
 ====================================================
-Owner: Team Member 2 (OCR / Receipt Extraction)
+Owner: Member 4 (Streamlit UI + OCR)
 
 Responsibility:
 - Processes uploaded receipt images (JPG/PNG) and extracts structured fields:
@@ -51,7 +51,7 @@ def extract_receipt(image_file: Any, filename_hint: Optional[str] = None) -> Dic
     name = (filename_hint or getattr(image_file, "name", "receipt.jpg")).lower()
 
     # -------------------------------------------------------------------------
-    # TODO (Team Member 2): Replace demo extraction below with live Tesseract
+    # TODO (Member 4): Replace demo extraction below with live Tesseract
     # or Vision LLM pipeline:
     #
     # from PIL import Image

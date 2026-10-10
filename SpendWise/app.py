@@ -1,7 +1,7 @@
 """
 SpendWise — Main Streamlit Application Entry Point
 ==================================================
-Owner: UI / Frontend Team
+Owner: Member 4 (Streamlit UI + OCR)
 
 Responsibility:
 - Configures the Streamlit page layout, custom professional financial CSS styling,

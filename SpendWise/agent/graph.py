@@ -1,7 +1,7 @@
 """
 SpendWise — LangGraph Agent Orchestrator
 ========================================
-Owner: Team Member 1 (Agent / LangGraph)
+Owner: Member 1 (AI Agent / LangGraph)
 
 Responsibility:
 - Implements the core Agentic AI workflow:

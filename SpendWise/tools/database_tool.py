@@ -1,7 +1,7 @@
 """
 SpendWise — Database Tool Layer
 ===============================
-Owner: Team Member 3 (Database + Transactions)
+Owner: Member 2 (Database + Categorization)
 
 Responsibility:
 - Exposes clean Python functions & LangChain tool interfaces for reading/writing

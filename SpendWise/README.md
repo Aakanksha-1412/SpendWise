@@ -37,7 +37,7 @@ SpendWise/
 │
 ├── app.py                        # Main Streamlit multi-page entry point & layout config
 │
-├── pages/                        # UI Layer (Streamlit Pages — Zero raw SQL or Pandas math)
+├── pages/                        # Member 4: UI Layer (Streamlit Pages — Zero raw SQL or Pandas math)
 │   ├── home.py                   # Executive dashboard, summary KPIs, navigation cards, AI insights
 │   ├── transactions.py           # Filterable ledger + Natural Language & Form expense entry
 │   ├── upload.py                 # CSV bulk importer + Receipt OCR extraction pipeline UI
@@ -45,22 +45,22 @@ SpendWise/
 │   ├── analytics.py              # 6 Plotly financial charts + Automated Spike Detection banner
 │   └── assistant.py              # Ask SpendWise AI chat interface with LangGraph trace viewer
 │
-├── agent/                        # Team Member 1: LangGraph Agentic Orchestrator
+├── agent/                        # Member 1: LangGraph Agentic Orchestrator
 │   ├── graph.py                  # StateGraph nodes (Understand -> Route -> Call -> Evaluate -> Respond)
 │   ├── state.py                  # TypedDict AgentState schema
 │   └── prompts.py                # System instructions & intent classification prompts
 │
 ├── tools/                        # Deterministic Agent & UI Tools
-│   ├── ocr_tool.py               # Team Member 2: Receipt image -> Merchant, Date, Items, Tax, Total
-│   ├── database_tool.py          # Team Member 3: SQLite CRUD & query interfaces
-│   ├── categorization_tool.py    # Team Member 1/2: Auto-categorization & NL expense parser
-│   ├── budget_tool.py            # Team Member 4: Budget vs actual & discretionary reallocation
-│   └── spike_detector.py         # Team Member 4: Weekly spending anomaly / spike detection
+│   ├── ocr_tool.py               # Member 4: Receipt image -> Merchant, Date, Items, Tax, Total
+│   ├── database_tool.py          # Member 2: SQLite CRUD & query interfaces
+│   ├── categorization_tool.py    # Member 2: Auto-categorization & NL expense parser
+│   ├── budget_tool.py            # Member 3: Budget vs actual & discretionary reallocation
+│   └── spike_detector.py         # Member 3: Weekly spending anomaly / spike detection
 │
-├── database/                     # Team Member 3: SQLite Setup & Schema
+├── database/                     # Member 2: SQLite Setup & Schema
 │   └── database.py               # Initializes `transactions` & `budgets` tables + demo seed data
 │
-├── analytics/                    # Team Member 4: Pandas Aggregation Layer
+├── analytics/                    # Member 3: Pandas Aggregation Layer
 │   └── analytics.py              # DataFrames for category, weekly, monthly, and trend charts
 │
 ├── utils/                        # Shared Helpers & Constants
@@ -84,11 +84,11 @@ To prevent merge conflicts, each team member owns dedicated modules and communic
 
 | Role / Team Member | Owned Directories & Files | Public Function Contracts Exposed |
 | :--- | :--- | :--- |
-| **Team Member 1**<br>*(Agent / LangGraph / ChromaDB)* | `agent/graph.py`<br>`agent/state.py`<br>`agent/prompts.py` | `run_agent(user_query, uploaded_receipt=None) -> dict` |
-| **Team Member 2**<br>*(OCR & Receipt Extraction)* | `tools/ocr_tool.py`<br>`tools/categorization_tool.py` | `extract_receipt(image_file) -> dict`<br>`categorize_expense(merchant, description) -> str` |
-| **Team Member 3**<br>*(Database & Transactions)* | `database/database.py`<br>`tools/database_tool.py` | `add_transaction(tx)`<br>`get_transactions(category, merchant_query, date_filter)`<br>`get_category_spending(category, month, year)` |
-| **Team Member 4**<br>*(Analytics, Budget & Spikes)* | `analytics/analytics.py`<br>`tools/budget_tool.py`<br>`tools/spike_detector.py` | `calculate_budget_status(category)`<br>`suggest_discretionary_reallocation()`<br>`detect_spending_spike(category)` |
-| **UI / Integration**<br>*(Streamlit Multi-Page UI)* | `app.py`<br>`pages/*.py` | Calls the functions above; never writes raw SQL or inline Pandas math. |
+| **Member 1**<br>*(AI Agent / LangGraph)* | `agent/graph.py`<br>`agent/state.py`<br>`agent/prompts.py` | `run_agent(user_query, uploaded_receipt=None) -> dict` |
+| **Member 2**<br>*(Database + Categorization)* | `database/database.py`<br>`tools/database_tool.py`<br>`tools/categorization_tool.py` | `add_transaction(tx)`<br>`get_transactions(category, merchant_query, date_filter)`<br>`get_category_spending(category, month, year)`<br>`categorize_expense(merchant, description) -> str` |
+| **Member 3**<br>*(Analytics + Budget + Alerts)* | `analytics/analytics.py`<br>`tools/budget_tool.py`<br>`tools/spike_detector.py` | `calculate_budget_status(category)`<br>`suggest_discretionary_reallocation()`<br>`detect_spending_spike(category)` |
+| **Member 4**<br>*(Streamlit UI + OCR)* | `app.py`<br>`pages/*.py`<br>`tools/ocr_tool.py` | `extract_receipt(image_file) -> dict`<br>Pages call the functions above; never write raw SQL or inline Pandas math. |
+| **Member 5**<br>*(Testing + Integration)* | Testing checklist / test scripts | Tests each module and end-to-end flows (Receipt → OCR → Categorization → SQLite → Budget → Alert → AI response). |
 
 ---
 

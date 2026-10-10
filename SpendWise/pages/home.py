@@ -1,7 +1,7 @@
 """
 SpendWise — Home Dashboard Page
 ===============================
-Owner: UI / Frontend Team
+Owner: Member 4 (Streamlit UI + OCR)
 
 Responsibility:
 - Displays the executive financial overview:

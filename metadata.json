@@ -1,6 +1,0 @@
-{
-  "name": "SpendWise — Autonomous Personal Financial Expense & Budgeting Assistant",
-  "description": "Modular Agentic AI personal finance, OCR receipt extraction, budget analytics, spending spike detection, and LangGraph orchestration platform.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

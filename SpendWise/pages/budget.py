@@ -1,7 +1,7 @@
 """
 SpendWise — Monthly Budget Manager Page
 =======================================
-Owner: UI / Frontend Team & Team Member 4 (Budget Tool Integration)
+Owner: Member 4 (Streamlit UI) — consumes `tools/budget_tool.py` (Member 3)
 
 Responsibility:
 - Allows the user to define and update monthly budgets for all 8 official categories:

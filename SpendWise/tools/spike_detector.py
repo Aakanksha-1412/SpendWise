@@ -1,7 +1,7 @@
 """
 SpendWise — Spending Spike Detection Tool
 =========================================
-Owner: Team Member 4 (Analytics + Budget + Spike Detection)
+Owner: Member 3 (Analytics + Budget + Alerts)
 
 Responsibility:
 - Compares current weekly spending (Oct 1–Oct 8, 2026) against previous weekly

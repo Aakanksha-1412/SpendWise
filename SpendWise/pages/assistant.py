@@ -1,7 +1,7 @@
 """
 SpendWise — AI Assistant Page (`🤖 Ask SpendWise`)
 ==================================================
-Owner: UI / Frontend Team & Team Member 1 (Agent / LangGraph)
+Owner: Member 4 (Streamlit UI) — calls `agent/graph.py -> run_agent()` (Member 1)
 
 Responsibility:
 - Provides a conversational Agentic AI interface where users can ask questions

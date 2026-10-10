@@ -1,7 +1,7 @@
 """
 SpendWise — Budget Calculation & Discretionary Reallocation Tool
 ================================================================
-Owner: Team Member 4 (Analytics + Budget + Spike Detection)
+Owner: Member 3 (Analytics + Budget + Alerts)
 
 Responsibility:
 - Deterministic Python/Pandas calculations comparing monthly category budgets

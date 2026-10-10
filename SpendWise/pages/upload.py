@@ -1,7 +1,7 @@
 """
 SpendWise — Upload Expense Page (CSV & Receipt OCR)
 ===================================================
-Owner: UI / Frontend Team & Team Member 2 (OCR Integration)
+Owner: Member 4 (Streamlit UI + OCR)
 
 Responsibility:
 - Section A: Upload CSV transactions file, auto-categorize rows if needed, preview,

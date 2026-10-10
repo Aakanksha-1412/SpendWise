@@ -1,7 +1,7 @@
 """
 SpendWise — Pandas Financial Analytics Engine
 =============================================
-Owner: Team Member 4 (Analytics + Budget + Spike Detection)
+Owner: Member 3 (Analytics + Budget + Alerts)
 
 Responsibility:
 - Performs all Pandas DataFrame aggregations for the Home Dashboard and Analytics Page:
