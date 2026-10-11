@@ -13,6 +13,7 @@ Responsibility:
 import streamlit as st
 import pandas as pd
 
+from analytics.analytics import get_money_plan
 from tools.budget_tool import get_all_budget_statuses
 from tools.database_tool import upsert_budget
 from utils.helpers import CATEGORIES, format_inr, period_label
@@ -26,6 +27,20 @@ def render_budget_page() -> None:
     )
 
     statuses = get_all_budget_statuses()
+
+    plan = get_money_plan()
+    if plan:
+        if plan["budgets_over_available"] > 0:
+            st.warning(
+                f"⚠️ Your budgets add up to {format_inr(plan['budget_total'])} — "
+                f"{format_inr(plan['budgets_over_available'])} more than you can spend "
+                f"(income {format_inr(plan['monthly_income'])} − savings goal {format_inr(plan['savings_goal'])})."
+            )
+        else:
+            st.caption(
+                f"Your budgets total {format_inr(plan['budget_total'])} of the "
+                f"{format_inr(plan['available_to_spend'])} you can spend after your savings goal."
+            )
 
     # -------------------------------------------------------------------------
     # 1. UPDATE CATEGORY BUDGET FORM

@@ -185,10 +185,11 @@ existed (older databases are upgraded automatically, keeping their data).
 - When you add an expense in chat and it eats into your savings goal, SpendWise warns you.
 
 ### Using your own data
-Open **👤 My Profile & Setup**, enter your monthly income, savings goal and usual spending per
-category, keep **Start fresh** ticked, and click **Save & create my budgets**. The demo data is removed
-(and never added again), and this month's budgets are created from your usual spending, trimmed
-(Food/Shopping/Entertainment/Others first) if it's more than income − savings goal.
+A new account opens on **"Welcome! Let's set up your budget"**: enter your monthly income, savings goal
+and your budget per category (or leave the budgets empty and SpendWise splits your money automatically),
+then click **Save & create my budgets**. Each number lives in ONE place afterwards:
+**👤 My Profile** = income & savings goal only; **🎯 Budget Manager** = budgets per category (it warns if
+they add up to more than income − savings goal).
 
 ### Known limits
 - Free Gemini tier: about 5 requests/minute and 20/day per model (one question = 2–3 requests).

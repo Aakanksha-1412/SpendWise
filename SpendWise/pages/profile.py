@@ -4,8 +4,9 @@ SpendWise — My Profile & Money Plan Page
 Owner: Member 4 (Streamlit UI + OCR)
 
 Responsibility:
-- Lets the user enter THEIR OWN numbers: monthly income, savings goal and what they
-  usually spend per category in a month (saved per account, so it's entered only once).
+- First time: income, savings goal and the budget per category (saved as budgets).
+  Later: only income and savings goal. Budgets are changed ONLY on the Budget page,
+  so the same number is never entered in two places.
 - After saving, shows the user's money plan: how income is split, what they can still
   spend while keeping the savings goal, and which budgets are fine / almost full / full.
 - Optionally removes the current data ("start fresh").
@@ -88,77 +89,95 @@ def render_money_plan(plan: dict) -> None:
             )
 
 
-def render_profile_form(profile) -> None:
-    usual_now = profile["usual_spending"] if profile else {}
-    with st.form("profile_form"):
-        st.markdown("##### 1. Income & savings")
-        c1, c2 = st.columns(2)
-        with c1:
-            income = st.number_input(
-                "Monthly income / pocket money (₹)", min_value=0.0, step=500.0,
-                value=float(profile["monthly_income"]) if profile else None, placeholder="e.g. 15000",
-                key="profile_income",
-            )
-        with c2:
-            savings_goal = st.number_input(
-                "Savings goal per month (₹)", min_value=0.0, step=500.0,
-                value=float(profile["savings_goal"]) if profile else None, placeholder="e.g. 2000",
-                key="profile_savings",
-            )
+def _income_and_savings_inputs(profile):
+    c1, c2 = st.columns(2)
+    with c1:
+        income = st.number_input(
+            "Monthly income / pocket money (₹)", min_value=0.0, step=500.0,
+            value=float(profile["monthly_income"]) if profile else None, placeholder="e.g. 15000",
+            key="profile_income",
+        )
+    with c2:
+        savings_goal = st.number_input(
+            "Savings goal per month (₹)", min_value=0.0, step=500.0,
+            value=float(profile["savings_goal"]) if profile else None, placeholder="e.g. 2000",
+            key="profile_savings",
+        )
+    return income or 0.0, savings_goal or 0.0
 
-        st.markdown("##### 2. How much do you usually spend in a month? (rough guess is fine)")
+
+def _start_fresh_checkbox(default: bool) -> bool:
+    if not get_transactions():
+        return False
+    return st.checkbox(
+        "Start fresh: remove ALL my current expenses and budgets (e.g. demo data)",
+        value=default, key="profile_start_fresh",
+    )
+
+
+def _valid(income: float, savings_goal: float) -> bool:
+    if income <= 0:
+        st.error("Please enter your monthly income (more than ₹0).")
+        return False
+    if savings_goal > income:
+        st.error("Your savings goal can't be more than your income.")
+        return False
+    return True
+
+
+def render_setup_form() -> None:
+    """First time only: income, savings goal and the budgets themselves (saved as budgets)."""
+    with st.form("setup_form"):
+        st.markdown("##### 1. Income & savings")
+        income, savings_goal = _income_and_savings_inputs(None)
+
+        st.markdown(f"##### 2. Your monthly budget per category for {period_label()}")
         st.caption(
-            "Used to suggest your starting budgets. To change a budget later, use the 🎯 Budget page."
+            "These become your budgets (change them any time on the 🎯 Budget page). "
+            "Leave all empty and SpendWise splits your money automatically."
         )
         cols = st.columns(4)
-        usual = {}
+        typed = {}
         for idx, cat in enumerate(CATEGORIES):
             with cols[idx % 4]:
-                usual[cat] = st.number_input(
-                    f"{cat} (₹)", min_value=0.0, step=100.0,
-                    value=float(usual_now[cat]) if profile else None, placeholder="0",
-                    key=f"profile_usual_{cat}",
+                typed[cat] = st.number_input(
+                    f"{cat} (₹)", min_value=0.0, step=100.0, value=None, placeholder="0",
+                    key=f"setup_budget_{cat}",
                 )
+        start_fresh = _start_fresh_checkbox(default=True)
+        submitted = st.form_submit_button("Save & create my budgets", type="primary")
 
-        if profile is None:
-            update_budgets = True  # first setup: starting budgets always come from usual spending
-            st.caption(f"Your {period_label()} budgets will be created from this. You can change them on the Budget page.")
+    if submitted and _valid(income, savings_goal):
+        save_profile(income, savings_goal, {})  # profile first: demo data then never returns
+        removed = remove_all_data() if start_fresh else 0
+        if any(amount for amount in typed.values()):
+            budgets = {cat: amount or 0.0 for cat, amount in typed.items()}
         else:
-            # Editing later must not silently overwrite budgets changed on the Budget page
-            update_budgets = st.checkbox(
-                f"Also replace ALL my {period_label()} budgets with suggestions from this "
-                "(this overwrites changes you made on the Budget page)",
-                value=False, key="profile_update_budgets",
-            )
-        start_fresh = False
-        if get_transactions():
-            start_fresh = st.checkbox(
-                "Start fresh: remove ALL my current expenses and budgets (e.g. demo data)",
-                value=profile is None, key="profile_start_fresh",
-            )
+            budgets = suggest_budgets(income, savings_goal, {})
+        for cat, amount in budgets.items():
+            upsert_budget(cat, amount)
+        message = f"Saved! Your {period_label()} budgets total {format_inr(sum(budgets.values()))}."
+        if start_fresh:
+            message += f" Removed {removed} old expenses."
+        st.session_state["profile_saved_message"] = message
+        st.rerun()
+
+
+def render_edit_form(profile) -> None:
+    """Later: only income and savings goal. Budgets are changed on the Budget page only."""
+    with st.form("profile_form"):
+        income, savings_goal = _income_and_savings_inputs(profile)
+        st.caption("To change your budgets, use the 🎯 Budget page.")
+        start_fresh = _start_fresh_checkbox(default=False)
         submitted = st.form_submit_button("Save", type="primary")
 
-    if submitted:
-        income = income or 0.0
-        savings_goal = savings_goal or 0.0
-        usual = {cat: amount or 0.0 for cat, amount in usual.items()}
-        if income <= 0:
-            st.error("Please enter your monthly income (more than ₹0).")
-        elif savings_goal > income:
-            st.error("Your savings goal can't be more than your income.")
-        else:
-            save_profile(income, savings_goal, usual)
-            removed = remove_all_data() if start_fresh else 0
-            message = "Saved!"
-            if update_budgets or start_fresh:
-                budgets = suggest_budgets(income, savings_goal, usual)
-                for cat, amount in budgets.items():
-                    upsert_budget(cat, amount)
-                message += f" Your {period_label()} budgets total {format_inr(sum(budgets.values()))}."
-            if start_fresh:
-                message += f" Removed {removed} old expenses."
-            st.session_state["profile_saved_message"] = message
-            st.rerun()
+    if submitted and _valid(income, savings_goal):
+        save_profile(income, savings_goal, profile["usual_spending"])
+        message = "Saved!"
+        if start_fresh:
+            message += f" Removed {remove_all_data()} old expenses and your budgets — set new ones on the Budget page."
+        st.session_state["profile_saved_message"] = message
+        st.rerun()
 
 
 def render_profile_page() -> None:
@@ -170,19 +189,19 @@ def render_profile_page() -> None:
     if profile is None:
         st.title("👋 Welcome! Let's set up your budget")
         st.caption(
-            "Tell SpendWise about your money once — it's saved to your account. Your income, savings goal "
-            f"and usual spending are used to create your budgets for {period_label()}."
+            "Tell SpendWise about your money once — it's saved to your account. "
+            f"Enter your income, savings goal and budgets for {period_label()}."
         )
         if get_transactions():
             st.info("You're looking at **demo data**. Fill this in and tick *Start fresh* to use only your own data.")
-        render_profile_form(None)
+        render_setup_form()
         return
 
     st.title("👤 My Profile & Money Plan")
     render_money_plan(get_money_plan())
     st.divider()
-    with st.expander("✏️ Edit my details (income, savings goal, usual spending)"):
-        render_profile_form(profile)
+    with st.expander("✏️ Edit income & savings goal"):
+        render_edit_form(profile)
     if st.button("🎯 Open Budget page"):
         st.switch_page("pages/budget.py")
 

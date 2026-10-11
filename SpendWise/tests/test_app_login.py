@@ -75,7 +75,7 @@ def test_brand_new_account_opens_on_budget_setup_with_empty_fields():
     assert not app.exception
     assert any("set up your budget" in t.value for t in app.title)
     assert app.number_input(key="profile_income").value is None  # empty, not 0.00
-    assert app.number_input(key="profile_usual_Food").value is None
+    assert app.number_input(key="setup_budget_Food").value is None
     assert not [c for c in app.checkbox if c.key == "profile_start_fresh"]  # nothing to remove yet
     assert not any("Total Spent" in m.value for m in app.markdown)  # no empty dashboard
 

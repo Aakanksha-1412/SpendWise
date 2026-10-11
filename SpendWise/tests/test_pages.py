@@ -29,7 +29,7 @@ def test_assistant_shows_question_and_answer():
     assert history[-1]["role"] == "assistant" and "Food" in history[-1]["content"]
 
 
-def test_profile_page_saves_income_creates_budgets_and_removes_demo_data():
+def test_first_setup_saves_income_and_the_budgets_typed_and_removes_demo_data():
     from tools.database_tool import get_all_budgets, get_profile, get_transactions
 
     app = AppTest.from_file(str(PAGES / "profile.py"), default_timeout=60).run()
@@ -37,19 +37,32 @@ def test_profile_page_saves_income_creates_budgets_and_removes_demo_data():
 
     app.number_input(key="profile_income").set_value(20000.0)
     app.number_input(key="profile_savings").set_value(3000.0)
-    app.number_input(key="profile_usual_Food").set_value(4000.0)
-    app.number_input(key="profile_usual_Bills").set_value(2500.0)
-    next(b for b in app.button if b.label == "Save").click().run()  # start fresh is ticked by default
+    app.number_input(key="setup_budget_Food").set_value(4000.0)
+    app.number_input(key="setup_budget_Bills").set_value(2500.0)
+    next(b for b in app.button if b.label == "Save & create my budgets").click().run()  # start fresh ticked
 
     assert not app.exception
     assert get_profile()["monthly_income"] == 20000.0
     assert get_transactions() == []
-    assert get_all_budgets()["Food"] == 4000.0
+    budgets = get_all_budgets()
+    assert budgets["Food"] == 4000.0 and budgets["Bills"] == 2500.0 and budgets["Shopping"] == 0.0
     assert any("Saved!" in message.value for message in app.success)
-    # after saving: the money plan with charts is shown, the form is folded away
+    # after saving: the money plan with charts is shown, the edit form is folded away
     assert any("can still spend" in message.value for message in app.success)
     assert len(app.get("plotly_chart")) == 2
-    assert [e.label for e in app.expander] == ["✏️ Edit my details (income, savings goal, usual spending)"]
+    assert [e.label for e in app.expander] == ["✏️ Edit income & savings goal"]
+
+
+def test_first_setup_with_empty_budgets_splits_the_money_automatically():
+    from tools.database_tool import get_all_budgets
+
+    app = AppTest.from_file(str(PAGES / "profile.py"), default_timeout=60).run()
+    app.number_input(key="profile_income").set_value(12000.0)
+    app.number_input(key="profile_savings").set_value(2000.0)
+    next(b for b in app.button if b.label == "Save & create my budgets").click().run()
+
+    total = sum(get_all_budgets().values())
+    assert 9500 <= total <= 10000
 
 
 def test_home_shows_income_and_savings_after_setup():
@@ -67,17 +80,31 @@ def test_home_shows_income_and_savings_after_setup():
     assert not any("demo numbers" in i.value for i in app.info)
 
 
-def test_editing_the_profile_keeps_budgets_changed_on_the_budget_page():
+def test_profile_edit_has_only_income_and_savings_and_keeps_budgets():
     from tools.database_tool import get_all_budgets, get_profile, remove_all_data, save_profile, upsert_budget
 
-    save_profile(15000, 2000, {"Food": 4000})
+    save_profile(15000, 2000, {})
     remove_all_data()
-    upsert_budget("Food", 7500)  # changed on the Budget page
+    upsert_budget("Food", 7500)  # set on the Budget page
 
     app = AppTest.from_file(str(PAGES / "profile.py"), default_timeout=60).run()
-    assert app.checkbox(key="profile_update_budgets").value is False  # not ticked when editing
+    keys = [n.key for n in app.number_input]
+    assert keys == ["profile_income", "profile_savings"]  # no per-category amounts here
     app.number_input(key="profile_income").set_value(18000.0)
     next(b for b in app.button if b.label == "Save").click().run()
 
     assert get_profile()["monthly_income"] == 18000.0
     assert get_all_budgets()["Food"] == 7500.0  # untouched
+
+
+def test_budget_page_warns_when_budgets_are_more_than_income_minus_savings():
+    from tools.database_tool import remove_all_data, save_profile, upsert_budget
+
+    save_profile(10000, 3000, {})
+    remove_all_data()
+    upsert_budget("Food", 5000)
+    upsert_budget("Shopping", 4000)  # 9,000 > 7,000 available
+
+    app = AppTest.from_file(str(PAGES / "budget.py"), default_timeout=60).run()
+
+    assert any("₹2,000 more" in w.value for w in app.warning)

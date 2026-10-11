@@ -204,6 +204,8 @@ def get_money_plan(month: Optional[int] = None, year: Optional[int] = None) -> O
         "savings_goal": savings_goal,
         "spent": spent,
         "budget_total": budget_total,
+        "available_to_spend": round(income - savings_goal, 2),  # income - savings goal
+        "budgets_over_available": round(max(budget_total - (income - savings_goal), 0.0), 2),
         "budget_left": round(sum(max(s["remaining"], 0.0) for s in statuses if s["budget"] > 0), 2),
         "can_still_spend": round(income - savings_goal - spent, 2),
         "unplanned": round(max(income - savings_goal - budget_total, 0.0), 2),

@@ -99,21 +99,19 @@ def get_saving_suggestions() -> Dict[str, Any]:
 
 @tool
 def get_my_profile() -> Dict[str, Any]:
-    """Get the user's monthly income, savings goal, usual monthly spending per category, and
-    how much money is left this month after spending (income - spent so far).
+    """Get the user's monthly income, savings goal, and how much money is left this month
+    after spending (income - spent so far).
     Use for "how much can I still save?", "am I on track for my savings goal?",
     "what is my income?"."""
     summary = get_summary_metrics()
     if summary["monthly_income"] is None:
         return {"error": "The user hasn't entered their income yet. Ask them to fill in the 'My Profile' page."}
-    profile = get_profile()
     return {
         "monthly_income": summary["monthly_income"],
         "savings_goal": summary["savings_goal"],
         "spent_this_month": summary["total_spent"],
         "left_after_spending": summary["saved_so_far"],
         "savings_goal_on_track": summary["savings_on_track"],
-        "usual_spending": profile["usual_spending"],
     }
 
 
