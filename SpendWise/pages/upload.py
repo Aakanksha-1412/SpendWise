@@ -16,19 +16,18 @@ import pandas as pd
 
 from database.database import current_user_id
 from tools.ocr_tool import extract_receipt
-from tools.categorization_tool import categorize_expense, merchant_memory_version
-from tools.database_tool import add_transaction, bulk_insert_transactions
+from tools.categorization_tool import merchant_memory_version
+from tools.csv_import_tool import import_rows, read_transactions_csv
+from tools.database_tool import add_transaction
 from utils.helpers import CATEGORIES, format_inr
 
 
-@st.cache_data(show_spinner="Categorizing transactions...")
-def _categorize_rows(rows: tuple, memory_version: int, user_id: int) -> list:
-    """Category for each (merchant, description) row. Cached, so Streamlit reruns
-    (e.g. clicking Import) don't repeat the ChromaDB lookups; each distinct row is checked once.
-    `memory_version` and `user_id` are part of the cache key, so newly learned merchants are
-    picked up and one user's cached categories are never shown to another."""
-    unique = {row: categorize_expense(*row) for row in dict.fromkeys(rows)}
-    return [unique[row] for row in rows]
+@st.cache_data(show_spinner="Reading and categorizing transactions...")
+def _read_csv(data: bytes, memory_version: int, user_id: int) -> dict:
+    """Cleaned CSV rows. Cached, so Streamlit reruns (e.g. clicking Import) don't repeat the
+    ChromaDB lookups. `memory_version` and `user_id` are part of the cache key, so newly learned
+    merchants are picked up and one user's cached result is never shown to another."""
+    return read_transactions_csv(data)
 
 
 def render_upload_page() -> None:
@@ -47,30 +46,26 @@ def render_upload_page() -> None:
         uploaded_csv = st.file_uploader("Select a CSV file", type=["csv"], key="csv_uploader")
 
         if uploaded_csv is not None:
-            try:
-                csv_df = pd.read_csv(uploaded_csv)
-                csv_df.columns = [c.strip().lower() for c in csv_df.columns]
-
-                required = {"date", "merchant", "amount"}
-                if not required.issubset(set(csv_df.columns)):
-                    st.error(f"CSV must contain at least columns: {required}")
-                else:
-                    if "description" not in csv_df.columns:
-                        csv_df["description"] = "CSV Import"
-                    if "category" not in csv_df.columns:
-                        rows = tuple(zip(csv_df["merchant"].astype(str), csv_df["description"].astype(str)))
-                        csv_df["category"] = _categorize_rows(rows, merchant_memory_version(), current_user_id())
-                    csv_df["source"] = "CSV"
-
-                    st.markdown(f"**Preview ({len(csv_df)} rows detected):**")
-                    st.dataframe(csv_df.head(10), width="stretch", hide_index=True)
-
+            result = _read_csv(uploaded_csv.getvalue(), merchant_memory_version(), current_user_id())
+            if result["error"]:
+                st.error(result["error"])
+            else:
+                if result["skipped"]:
+                    with st.expander(f"⚠️ {len(result['skipped'])} row(s) will be skipped — see why"):
+                        for reason in result["skipped"]:
+                            st.markdown(f"- {reason}")
+                if result["rows"]:
+                    preview = pd.DataFrame(result["rows"])
+                    st.markdown(f"**Preview ({len(preview)} expenses ready to import):**")
+                    st.dataframe(preview.head(10), width="stretch", hide_index=True)
                     if st.button("Import CSV Transactions to SQLite", type="primary", width="stretch"):
-                        records = csv_df.to_dict(orient="records")
-                        count = bulk_insert_transactions(records)
-                        st.success(f"Successfully imported {count} transactions into SQLite!")
-            except Exception as exc:
-                st.error(f"Failed to parse CSV file: {exc}")
+                        outcome = import_rows(result["rows"])
+                        message = f"Imported {outcome['imported']} new expenses."
+                        if outcome["duplicates"]:
+                            message += f" Skipped {outcome['duplicates']} already saved before (no duplicates)."
+                        st.success(message)
+                else:
+                    st.warning("No expenses could be read from this file.")
 
     # =========================================================================
     # SECTION B: UPLOAD RECEIPT (OCR PIPELINE)
