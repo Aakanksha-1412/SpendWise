@@ -6,6 +6,10 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+# Load the real `analytics` package first: when AppTest runs pages/analytics.py it puts the
+# pages/ folder on the import path, and "analytics" could otherwise resolve to that page file.
+import analytics.analytics  # noqa: F401
+
 PAGES = Path(__file__).resolve().parents[1] / "pages"
 
 

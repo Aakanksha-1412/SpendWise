@@ -59,7 +59,7 @@ def render_transactions_page() -> None:
             with st.form("manual_expense_form", clear_on_submit=True):
                 f_cols = st.columns(4)
                 with f_cols[0]:
-                    tx_date = st.date_input("Date", value=datetime(2026, 10, 8))
+                    tx_date = st.date_input("Date", value=datetime.now())
                 with f_cols[1]:
                     merchant = st.text_input("Merchant", placeholder="e.g., Swiggy, Uber, Amazon")
                 with f_cols[2]:
