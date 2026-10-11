@@ -21,11 +21,11 @@ except ImportError:
     PANDAS_AVAILABLE = False
 
 from database.database import get_connection, init_db
-from tools.categorization_tool import remember_merchant_category
+from tools.categorization_tool import remember_merchant_categories, remember_merchant_category
 from utils.helpers import normalize_date, resolve_period, CATEGORIES
 
 
-def add_transaction(transaction: Dict[str, Any]) -> Dict[str, Any]:
+def add_transaction(transaction: Dict[str, Any], learn_category: bool = True) -> Dict[str, Any]:
     """
     Insert a single transaction into the SQLite `transactions` table.
 
@@ -39,6 +39,9 @@ def add_transaction(transaction: Dict[str, Any]) -> Dict[str, Any]:
         - category (str): One of the official 8 categories
         - description (str, optional): Notes/items
         - source (str, optional): 'Text' | 'CSV' | 'Receipt'
+
+    learn_category : bool
+        Teach ChromaDB this merchant -> category (bulk imports do it once at the end).
 
     Returns
     -------
@@ -70,7 +73,8 @@ def add_transaction(transaction: Dict[str, Any]) -> Dict[str, Any]:
     conn.close()
 
     # Teach ChromaDB semantic memory this merchant -> category (never blocks saving)
-    remember_merchant_category(merchant, category)
+    if learn_category:
+        remember_merchant_category(merchant, category)
 
     return {
         "id": new_id,
@@ -89,11 +93,9 @@ def bulk_insert_transactions(transactions: List[Dict[str, Any]]) -> int:
     Insert multiple transactions (e.g., from CSV upload) into SQLite.
     Returns count of inserted records.
     """
-    inserted_count = 0
-    for tx in transactions:
-        add_transaction(tx)
-        inserted_count += 1
-    return inserted_count
+    saved = [add_transaction(tx, learn_category=False) for tx in transactions]
+    remember_merchant_categories([(tx["merchant"], tx["category"]) for tx in saved])  # one ChromaDB write
+    return len(saved)
 
 
 def get_transactions(

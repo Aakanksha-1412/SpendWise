@@ -14,7 +14,9 @@ OCR engines, tried in this order:
                     directly (works with blurry/handwritten receipts; uses 1 Gemini request).
 2. Tesseract OCR  — if the Tesseract program is installed (path via TESSERACT_CMD_PATH or PATH):
                     image -> raw text -> simple rules find merchant/date/tax/total.
-3. Demo receipt   — when neither is available (clearly labelled in `engine`).
+3. Demo receipt   — ONLY when no image was given (the "Run Demo Receipt" button).
+If a real image can't be read, the fields come back EMPTY with read_ok=False — never demo
+values, so nobody saves a fake expense by mistake.
 """
 
 import base64
@@ -25,11 +27,10 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from tools.categorization_tool import categorize_expense
-from utils.helpers import get_setting, normalize_date
+from utils.helpers import DEFAULT_GEMINI_MODEL, get_setting, normalize_date
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_VISION_MODEL = "gemini-3.8-flash"
 
 
 def extract_receipt(image_file: Any, filename_hint: Optional[str] = None) -> Dict[str, Any]:
@@ -57,19 +58,20 @@ def extract_receipt(image_file: Any, filename_hint: Optional[str] = None) -> Dic
             "description": str,
             "source": "Receipt",
             "raw_text": str,
-            "engine": str
+            "engine": str,
+            "read_ok": bool   (False = a real image could not be read; fields are empty)
         }
     """
     name = (filename_hint or getattr(image_file, "name", "") or "receipt.jpg").lower()
     image_bytes = _read_image_bytes(image_file)
 
-    fields = None
     if image_bytes:
-        fields = _extract_with_gemini_vision(image_bytes, name) or _extract_with_tesseract(image_bytes)
-    if fields is None:
+        fields = _extract_with_gemini_vision(image_bytes, name) or _extract_with_tesseract(image_bytes) or _unreadable_receipt()
+    else:
         fields = _demo_receipt(name)
 
-    category = categorize_expense(fields["merchant"], " ".join(item["name"] for item in fields["items"]))
+    read_ok = fields.get("read_ok", True)
+    category = categorize_expense(fields["merchant"], " ".join(item["name"] for item in fields["items"])) if read_ok else "Others"
     return {
         "merchant": fields["merchant"],
         "date": fields["date"],
@@ -81,6 +83,7 @@ def extract_receipt(image_file: Any, filename_hint: Optional[str] = None) -> Dic
         "source": "Receipt",
         "raw_text": fields.get("raw_text", ""),
         "engine": fields["engine"],
+        "read_ok": read_ok,
     }
 
 
@@ -108,7 +111,7 @@ def _extract_with_gemini_vision(image_bytes: bytes, name: str) -> Optional[Dict[
             total: float = Field(description="Final amount paid, including tax")
 
         llm = ChatGoogleGenerativeAI(
-            model=get_setting("GEMINI_MODEL", DEFAULT_VISION_MODEL), google_api_key=api_key, temperature=0
+            model=get_setting("GEMINI_MODEL", DEFAULT_GEMINI_MODEL), google_api_key=api_key, temperature=0
         )
         mime = "image/png" if name.endswith(".png") else "image/jpeg"
         message = HumanMessage(
@@ -181,24 +184,32 @@ def parse_receipt_text(raw_text: str) -> Optional[Dict[str, Any]]:
     receipt_date = _clean_date(date_match.group(1)) if date_match else _clean_date("")
 
     total = None
+    grand_total = None
     tax = 0.0
     items = []
     for line in lines:
         lower = line.lower()
+        amounts = re.findall(_AMOUNT, line, re.IGNORECASE)
+        if "total" in lower and amounts:
+            # "Sub Total", "Total Qty: 3", "Total Items", "Total Savings" are not the amount paid
+            if "sub" in lower or re.search(r"total\s*(qty|quantity|items?|savings?|saved|discount)", lower):
+                continue
+            total = float(amounts[-1].replace(",", ""))
+            if re.search(r"\b(grand|net|payable)\b", lower):
+                grand_total = total
+            continue
         # Dates, times, bill numbers, phone numbers and GSTIN contain digits but aren't prices
         if re.search(date_pattern, line) or re.match(r"(date|time|bill|invoice|order|table|phone|ph|tel|mob|gstin|fssai)\b", lower):
             continue
-        amounts = re.findall(_AMOUNT, line, re.IGNORECASE)
         if not amounts:
             continue
         value = float(amounts[-1].replace(",", ""))
-        if "total" in lower and "sub" not in lower:
-            total = value
-        elif re.search(r"\b(gst|cgst|sgst|igst|vat|tax)\b", lower):
+        if re.search(r"\b(gst|cgst|sgst|igst|vat|tax)\b", lower):
             tax += value
         elif "sub" not in lower and re.search(r"[A-Za-z]{3,}", line) and line != merchant:
             items.append({"name": re.sub(_AMOUNT + r"\s*$", "", line, flags=re.IGNORECASE).strip(" .:-x"), "price": value})
 
+    total = grand_total if grand_total is not None else total
     if total is None:
         return None
     return {"merchant": merchant, "date": receipt_date, "items": items, "tax": tax, "total": total, "raw_text": raw_text}
@@ -231,6 +242,20 @@ def _demo_receipt(name: str) -> Dict[str, Any]:
         "total": total,
         "raw_text": "",
         "engine": "Demo receipt (no OCR engine available: set GEMINI_API_KEY or install Tesseract)",
+    }
+
+
+def _unreadable_receipt() -> Dict[str, Any]:
+    """A real image that no engine could read: empty fields for the user to fill in."""
+    return {
+        "merchant": "",
+        "date": datetime.now().strftime("%d-%m-%Y"),
+        "items": [],
+        "tax": 0.0,
+        "total": 0.0,
+        "raw_text": "",
+        "engine": "OCR failed: could not read this image (check GEMINI_API_KEY / quota, or install Tesseract)",
+        "read_ok": False,
     }
 
 

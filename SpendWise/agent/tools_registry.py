@@ -25,7 +25,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.tools import tool
 
 from analytics.analytics import get_summary_metrics
-from agent.period import this_month
 from tools.budget_tool import (
     calculate_budget_status,
     get_all_budget_statuses,
@@ -67,27 +66,27 @@ def _match_category(category: Optional[str]) -> Tuple[Optional[str], Optional[Di
 @tool
 def get_budget_status(category: str) -> Dict[str, Any]:
     """Get this month's budget, amount spent, remaining amount, % used and status
-    (UNDER BUDGET / NEAR LIMIT / OVER BUDGET) for ONE category.
+    (UNDER BUDGET / NEAR LIMIT / OVER BUDGET / NO BUDGET SET) for ONE category.
     Use for questions like "how much food budget is left?" or "how much did I spend on transport?".
     `category` must be one of: Food, Transport, Shopping, Entertainment, Bills, Healthcare, Education, Others."""
     official, error = _match_category(category)
     if error:
         return error
-    return calculate_budget_status(official, **this_month())
+    return calculate_budget_status(official)
 
 
 @tool
 def get_all_budgets_overview() -> List[Dict[str, Any]]:
     """Get budget vs spending status for ALL 8 categories this month.
     Use to find which categories are over budget, or to explain why a budget alert was raised."""
-    return get_all_budget_statuses(**this_month())
+    return get_all_budget_statuses()
 
 
 @tool
 def get_monthly_summary() -> Dict[str, Any]:
     """Get the overall picture for this month: total spent, total monthly budget,
     remaining budget and number of active alerts. Use for general "how am I doing?" questions."""
-    return get_summary_metrics(**this_month())
+    return get_summary_metrics()
 
 
 @tool
@@ -95,7 +94,7 @@ def get_saving_suggestions() -> Dict[str, Any]:
     """Find categories that are OVER budget and discretionary categories that still have
     unused budget, with ready-made suggestions on where to cut back.
     Use for "where can I reduce spending?" or "how do I fix my shopping overspend?"."""
-    return suggest_discretionary_reallocation(**this_month())
+    return suggest_discretionary_reallocation()
 
 
 @tool
@@ -145,7 +144,18 @@ def check_affordability(category: str, amount: float) -> Dict[str, Any]:
         return {"error": "Amount must be greater than 0."}
     # Simple deterministic maths so the LLM never has to calculate.
     # (Could move into tools/budget_tool.py later — ask Member 3.)
-    status = calculate_budget_status(official, **this_month())
+    status = calculate_budget_status(official)
+    if status["status"] == "NO BUDGET SET":
+        return {
+            "category": status["category"],
+            "planned_amount": amount,
+            "budget": 0.0,
+            "spent_this_month": status["spent"],
+            "no_budget_set": True,
+            "can_afford": None,
+            "note": "No budget is set for this category, so affordability can't be judged. "
+            "Suggest setting one on the Budget page.",
+        }
     left_after = round(status["remaining"] - amount, 2)
     return {
         "category": status["category"],
@@ -208,7 +218,7 @@ def add_expense(
     return {
         "saved": True,
         "transaction": saved,
-        "budget_after_saving": calculate_budget_status(official, **this_month()),
+        "budget_after_saving": calculate_budget_status(official),
     }
 
 
@@ -220,7 +230,13 @@ def read_uploaded_receipt() -> Dict[str, Any]:
     receipt = current_receipt.get()
     if receipt is None:
         return {"error": "No receipt image was uploaded with this message."}
-    return extract_receipt(receipt)
+    result = extract_receipt(receipt)
+    if not result["read_ok"]:
+        return {
+            "error": "The receipt image could not be read. Don't guess: ask the user to type "
+            "the merchant and amount, or to try a clearer photo."
+        }
+    return result
 
 
 # ------------------------------------------------------------------------------

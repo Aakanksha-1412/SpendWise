@@ -20,6 +20,14 @@ from tools.database_tool import add_transaction, bulk_insert_transactions
 from utils.helpers import CATEGORIES, format_inr
 
 
+@st.cache_data(show_spinner="Categorizing transactions...")
+def _categorize_rows(rows: tuple) -> list:
+    """Category for each (merchant, description) row. Cached, so Streamlit reruns
+    (e.g. clicking Import) don't repeat the ChromaDB lookups; each distinct row is checked once."""
+    unique = {row: categorize_expense(*row) for row in dict.fromkeys(rows)}
+    return [unique[row] for row in rows]
+
+
 def render_upload_page() -> None:
     st.title("📤 Upload Expenses (CSV & Receipt OCR)")
     st.caption("Ingest bank/UPI statement CSVs or extract structured receipt fields using the OCR pipeline.")
@@ -47,10 +55,8 @@ def render_upload_page() -> None:
                     if "description" not in csv_df.columns:
                         csv_df["description"] = "CSV Import"
                     if "category" not in csv_df.columns:
-                        csv_df["category"] = csv_df.apply(
-                            lambda r: categorize_expense(str(r["merchant"]), str(r["description"])),
-                            axis=1,
-                        )
+                        rows = tuple(zip(csv_df["merchant"].astype(str), csv_df["description"].astype(str)))
+                        csv_df["category"] = _categorize_rows(rows)
                     csv_df["source"] = "CSV"
 
                     st.markdown(f"**Preview ({len(csv_df)} rows detected):**")
@@ -90,6 +96,8 @@ def render_upload_page() -> None:
             ocr_data = st.session_state["ocr_result"]
             st.markdown("#### Extracted Receipt Fields")
             st.caption(f"Engine: `{ocr_data.get('engine')}`")
+            if not ocr_data.get("read_ok", True):
+                st.warning("⚠️ This receipt couldn't be read automatically. Please type the merchant, date and total below.")
 
             with st.form("confirm_ocr_form"):
                 e_col1, e_col2 = st.columns(2)

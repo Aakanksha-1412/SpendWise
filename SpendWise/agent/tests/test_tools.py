@@ -2,7 +2,7 @@
 Seam: the agent tools, called exactly the way Gemini calls them (`tool.invoke({...})`).
 """
 
-from agent.tools_registry import add_expense, search_transactions
+from agent.tools_registry import add_expense, check_affordability, current_receipt, read_uploaded_receipt, search_transactions
 
 
 def test_add_expense_rejects_a_date_it_cannot_read():
@@ -22,3 +22,28 @@ def test_search_lists_newest_dates_first_even_if_older_rows_were_added_later():
     newest = search_transactions.invoke({"category": "Food", "limit": 1})
 
     assert newest[0]["merchant"] == "Recent Cafe"
+
+
+def test_unreadable_receipt_gives_gemini_an_error_not_fake_data(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setenv("TESSERACT_CMD_PATH", "")
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    token = current_receipt.set(b"not-really-an-image")
+    try:
+        result = read_uploaded_receipt.invoke({})
+    finally:
+        current_receipt.reset(token)
+
+    assert "error" in result
+    assert "merchant" not in result
+
+
+def test_affordability_with_no_budget_set_does_not_say_over_budget(monkeypatch):
+    from tools.database_tool import upsert_budget
+
+    upsert_budget("Healthcare", 0.0)  # user removed the Healthcare budget this month
+
+    result = check_affordability.invoke({"category": "Healthcare", "amount": 200})
+
+    assert result["can_afford"] is None
+    assert result["no_budget_set"] is True

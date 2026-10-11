@@ -82,9 +82,18 @@ def init_db(db_path: Optional[str] = None) -> None:
     )
 
     conn.commit()
-    if seed_demo_enabled():
+    # Only look at the demo setting when there is something to fill (init_db runs on every query)
+    if _any_table_empty(conn) and seed_demo_enabled():
         _seed_initial_data_if_empty(conn)
     conn.close()
+
+
+def _any_table_empty(conn: sqlite3.Connection) -> bool:
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT (SELECT COUNT(*) FROM budgets) = 0 OR (SELECT COUNT(*) FROM transactions) = 0 AS empty"
+    )
+    return bool(cursor.fetchone()["empty"])
 
 
 def _demo_date(days_ago: int, current_period: bool) -> str:

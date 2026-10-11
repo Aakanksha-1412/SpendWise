@@ -7,7 +7,9 @@ Responsibility:
 - Used across UI pages, tools, and analytics modules without creating circular dependencies.
 """
 
+import os
 from datetime import datetime
+from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 # Official SpendWise Expense Categories
@@ -114,20 +116,33 @@ def period_label(month: Optional[int] = None, year: Optional[int] = None) -> str
     return datetime(year, month, 1).strftime("%B %Y")
 
 
+# SpendWise/.env — read by get_setting(); tests point this somewhere else.
+ENV_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+# Gemini model used by the agent and receipt OCR unless GEMINI_MODEL is set.
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+
+
 def get_setting(name: str, default: str = "") -> str:
     """
     Read a setting from real environment variables, else from SpendWise/.env.
     (Use for GEMINI_API_KEY, GEMINI_MODEL, SPENDWISE_SEED_DEMO, TESSERACT_CMD_PATH, ...)
+    The .env file is parsed again only when it changes, so editing it needs no restart.
     """
-    import os
-
     value = os.getenv(name)
     if value is None:
         try:
-            from dotenv import dotenv_values
-
-            env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-            value = dotenv_values(env_file).get(name)
-        except ImportError:
-            value = None
+            modified_time = os.path.getmtime(ENV_FILE_PATH)
+        except OSError:
+            modified_time = 0.0
+        value = _env_file_values(ENV_FILE_PATH, modified_time).get(name)
     return (value if value is not None else default).strip()
+
+
+@lru_cache(maxsize=4)
+def _env_file_values(path: str, modified_time: float) -> Dict[str, Optional[str]]:
+    """Parsed .env contents, cached per file version (a new modified time = re-read)."""
+    try:
+        from dotenv import dotenv_values
+    except ImportError:
+        return {}
+    return dotenv_values(path) if modified_time else {}

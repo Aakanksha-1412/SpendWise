@@ -30,12 +30,34 @@ def test_text_without_a_total_is_not_guessed():
     assert parse_receipt_text("hello\nworld") is None
 
 
-def test_without_any_ocr_engine_a_clearly_labelled_demo_is_returned(monkeypatch):
+def test_unreadable_real_receipt_is_not_replaced_by_demo_data(monkeypatch):
     monkeypatch.setenv("TESSERACT_CMD_PATH", "")
     monkeypatch.setattr("shutil.which", lambda name: None)
 
     result = extract_receipt(b"not-really-an-image", filename_hint="receipt.jpg")
 
+    assert result["read_ok"] is False
+    assert result["total"] == 0
+    assert result["merchant"] == ""
+    assert "Starbucks" not in str(result)
+
+
+def test_demo_receipt_only_when_no_image_was_given():
+    result = extract_receipt(None, filename_hint="starbucks_receipt.jpg")
+
+    assert result["read_ok"] is True
     assert result["engine"].startswith("Demo receipt")
-    assert result["total"] > 0
-    assert result["category"] == "Food"
+
+
+def test_bill_total_line_is_read_as_the_total():
+    fields = parse_receipt_text("CAFE MOCHA" + chr(10) + "Latte 150.00" + chr(10) + "Bill Total 150.00")
+
+    assert fields["total"] == 150.0
+
+
+def test_quantity_line_after_grand_total_does_not_replace_it():
+    text = chr(10).join(["CAFE MOCHA", "Latte 150.00", "Grand Total 150.00", "Total Qty: 1", "Total Savings 20.00"])
+
+    fields = parse_receipt_text(text)
+
+    assert fields["total"] == 150.0

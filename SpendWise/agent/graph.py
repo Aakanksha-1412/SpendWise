@@ -27,7 +27,6 @@ Public interface (used by `pages/assistant.py`):
 
 import json
 import logging
-import os
 import time
 from datetime import datetime
 from functools import lru_cache
@@ -35,11 +34,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from agent import memory
 from agent.fallback_agent import run_fallback_agent
+from utils.helpers import DEFAULT_GEMINI_MODEL, get_setting
 
 # The real agent needs LangChain + LangGraph. If they aren't installed, the app still
 # runs using the fallback agent (see `run_agent`).
 try:
-    from dotenv import dotenv_values
     from langchain_core.exceptions import ModelRateLimitError
     from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
     from langgraph.errors import GraphRecursionError
@@ -57,8 +56,6 @@ except ImportError as import_error:  # pragma: no cover - depends on the environ
 
 logger = logging.getLogger(__name__)
 
-ENV_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-DEFAULT_MODEL = "gemini-3.8-flash"
 # Safety net: stop if the agent <-> tools loop runs more than this many steps.
 MAX_GRAPH_STEPS = 12
 # Short-term memory: how many earlier chat messages Gemini sees (fewer = less data sent to Google).
@@ -74,35 +71,15 @@ class LLMUnavailableError(Exception):
 # ==============================================================================
 # 1. THE LLM (Gemini with our tools attached)
 # ==============================================================================
-def _setting(name: str, default: str = "") -> str:
-    """Read a setting from real environment variables, else from SpendWise/.env.
-    Editing .env takes effect without restarting the app."""
-    value = os.getenv(name) or _env_file_values(ENV_FILE_PATH, _modified_time(ENV_FILE_PATH)).get(name) or default
-    return value.strip()
-
-
-def _modified_time(path: str) -> float:
-    try:
-        return os.path.getmtime(path)
-    except OSError:
-        return 0.0
-
-
-@lru_cache(maxsize=2)
-def _env_file_values(path: str, modified_time: float) -> Dict[str, Optional[str]]:
-    """Parse .env once per version of the file (a new modified time = re-read)."""
-    return dotenv_values(path)
-
-
 def _get_llm_with_tools():
     """
     Return Gemini with our tool list attached (`bind_tools`), so Gemini knows each
     tool's name, description and inputs. Returns None if no API key is set.
     """
-    api_key = _setting("GEMINI_API_KEY")
+    api_key = get_setting("GEMINI_API_KEY")
     if not api_key or api_key.startswith("your_"):
         return None
-    return _build_llm(api_key, _setting("GEMINI_MODEL", DEFAULT_MODEL))
+    return _build_llm(api_key, get_setting("GEMINI_MODEL", DEFAULT_GEMINI_MODEL))
 
 
 @lru_cache(maxsize=4)

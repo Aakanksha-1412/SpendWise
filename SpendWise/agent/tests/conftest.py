@@ -15,6 +15,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 import agent.graph as graph
+import utils.helpers as helpers
 import database.database as database
 from agent import memory
 
@@ -75,7 +76,7 @@ def fake_gemini(monkeypatch):
 def no_gemini(monkeypatch, tmp_path):
     """No API key anywhere (also hides your real SpendWise/.env), so demo mode is used."""
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.setattr(graph, "ENV_FILE_PATH", str(tmp_path / "missing.env"))
+    monkeypatch.setattr(helpers, "ENV_FILE_PATH", str(tmp_path / "missing.env"))
 
 
 def gemini_asks(*calls):

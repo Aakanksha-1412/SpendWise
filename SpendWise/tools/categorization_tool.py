@@ -19,7 +19,7 @@ import logging
 import os
 import re
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from utils.helpers import CATEGORIES
 
@@ -35,7 +35,7 @@ MERCHANT_CATEGORY_KEYWORDS: Dict[str, list[str]] = {
     ],
     "Transport": [
         "uber", "ola", "rapido", "metro", "irctc", "petrol", "fuel", "shell",
-        "hpcl", "bus", "auto", "cab", "flight", "indigo", "train", "commute", "college"
+        "hpcl", "bus", "auto", "cab", "flight", "indigo", "train", "commute"
     ],
     "Shopping": [
         "amazon", "flipkart", "myntra", "ajio", "croma", "reliance digital",
@@ -55,7 +55,7 @@ MERCHANT_CATEGORY_KEYWORDS: Dict[str, list[str]] = {
         "doctor", "pharmacy", "medicine", "vitamins", "dental", "lab test"
     ],
     "Education": [
-        "coursera", "udemy", "edx", "unstop", "nptel", "tuition", "college fee",
+        "coursera", "udemy", "edx", "unstop", "nptel", "tuition", "college fee", "college",
         "textbook", "exam", "workshop", "certification", "library", "course"
     ],
 }
@@ -158,20 +158,29 @@ def remember_merchant_category(merchant: str, category: str) -> None:
     Teach the semantic memory that `merchant` belongs to `category` (called whenever an
     expense is saved), so the same or similar merchants are recognised next time.
     """
-    name = (merchant or "").strip()
-    if not name or category not in CATEGORIES or category == "Others":
+    remember_merchant_categories([(merchant, category)])
+
+
+def remember_merchant_categories(pairs: List[Tuple[str, str]]) -> None:
+    """Teach many (merchant, category) pairs in ONE ChromaDB write (used by CSV import)."""
+    learned: Dict[str, Tuple[str, str]] = {}
+    for merchant, category in pairs:
+        name = (merchant or "").strip()
+        if name and category in CATEGORIES and category != "Others":
+            learned[name.lower()] = (name, category)  # last one wins for repeated merchants
+    if not learned:
         return
     memory = _merchant_memory()
     if memory is None:
         return
     try:
         memory.upsert(
-            ids=[f"merchant:{name.lower()}"],
-            documents=[name],
-            metadatas=[{"category": category, "kind": "learned"}],
+            ids=[f"merchant:{key}" for key in learned],
+            documents=[name for name, _ in learned.values()],
+            metadatas=[{"category": category, "kind": "learned"} for _, category in learned.values()],
         )
     except Exception as exc:
-        logger.warning("ChromaDB could not remember %r: %r", name, exc)
+        logger.warning("ChromaDB could not remember %d merchants: %r", len(learned), exc)
 
 
 def parse_natural_language_expense(user_text: str) -> Dict[str, Any]:
