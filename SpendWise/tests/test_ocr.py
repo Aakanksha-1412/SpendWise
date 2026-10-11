@@ -70,3 +70,9 @@ def test_gst_number_line_is_not_counted_as_tax():
 
     assert fields["tax"] == 6.0
     assert fields["total"] == 126.0
+
+
+def test_amount_payable_line_is_read_as_the_total():
+    fields = parse_receipt_text(chr(10).join(["CAFE X", "Tea 40.00", "Amount Payable 40.00"]))
+
+    assert fields["total"] == 40.0

@@ -40,3 +40,12 @@ def test_saving_a_budget_uses_the_current_month():
         assert get_all_budgets()["Food"] == 7000.0
     with freeze_time("2026-10-11"):
         assert get_all_budgets()["Food"] == 5000.0  # October unchanged
+
+
+def test_category_spelling_from_a_csv_is_accepted_in_any_case():
+    from tools.database_tool import bulk_insert_transactions
+
+    database.init_db()
+    bulk_insert_transactions([{"date": "", "merchant": "Swiggy", "amount": 200, "category": "food", "description": ""}])
+
+    assert get_transactions(merchant_query="swiggy")[0]["category"] == "Food"

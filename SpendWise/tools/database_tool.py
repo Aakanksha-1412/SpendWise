@@ -54,9 +54,9 @@ def add_transaction(transaction: Dict[str, Any], learn_category: bool = True) ->
     date_str = normalize_date(str(transaction.get("date", "")))
     merchant = str(transaction.get("merchant", "Unknown Merchant")).strip()
     amount = float(transaction.get("amount", 0.0))
-    category = str(transaction.get("category", "Others")).strip()
-    if category not in CATEGORIES:
-        category = "Others"
+    # Accept any spelling case ("food", "FOOD" -> "Food"); unknown names become "Others"
+    category_text = str(transaction.get("category", "Others")).strip().lower()
+    category = next((official for official in CATEGORIES if official.lower() == category_text), "Others")
     description = str(transaction.get("description", "")).strip()
     source = str(transaction.get("source", "Text")).strip()
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

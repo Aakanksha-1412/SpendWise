@@ -18,7 +18,7 @@ Responsibility:
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from utils.helpers import CATEGORIES
@@ -201,13 +201,25 @@ def parse_natural_language_expense(user_text: str) -> Dict[str, Any]:
     Parse a natural-language expense statement into a structured transaction dictionary.
     Example input: "Spent ₹450 at Swiggy for late night dinner on 01-10-2026"
     """
-    # Extract amount (supports ₹450, Rs 450, 450.50, etc.)
-    amount_match = re.search(r"(?:₹|rs\.?|inr\s*)?\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)", user_text, re.IGNORECASE)
+    # Extract amount. Prefer a number marked as money (₹450, Rs 450, 450 rupees) or after a
+    # money word (spent/paid/for 300), so quantities like "2 coffees" aren't taken as the price.
+    number = r"(\d+(?:,\d{3})*(?:\.\d{1,2})?)"
+    amount_match = (
+        re.search(r"(?:₹|\brs\.?|\binr)\s*" + number, user_text, re.IGNORECASE)
+        or re.search(number + r"\s*(?:rs\b|rupees\b|inr\b|/-)", user_text, re.IGNORECASE)
+        or re.search(r"\b(?:spent|paid|for|of|worth|cost|costs)\s+" + number, user_text, re.IGNORECASE)
+        or re.search(number, user_text)
+    )
     amount = float(amount_match.group(1).replace(",", "")) if amount_match else 0.0
 
-    # Extract date if present (DD-MM-YYYY or YYYY-MM-DD), else default to today
+    # Extract date: DD-MM-YYYY / YYYY-MM-DD, or the words "yesterday" / "today"; default today
     date_match = re.search(r"\b(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})\b", user_text)
-    tx_date = date_match.group(1) if date_match else datetime.now().strftime("%d-%m-%Y")
+    if date_match:
+        tx_date = date_match.group(1)
+    elif re.search(r"\byesterday\b", user_text, re.IGNORECASE):
+        tx_date = (datetime.now() - timedelta(days=1)).strftime("%d-%m-%Y")
+    else:
+        tx_date = datetime.now().strftime("%d-%m-%Y")
 
     # Extract merchant heuristic ("at <Merchant>", "on <Merchant>", "from <Merchant>", "to <Merchant>")
     merchant = "General Merchant"

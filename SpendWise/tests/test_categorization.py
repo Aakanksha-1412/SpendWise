@@ -78,3 +78,20 @@ def test_a_learned_shop_matches_small_spelling_differences():
     remember_merchant_category("Quillfeather Academy", "Education")
 
     assert categorize_expense("Quillfeather academy") == "Education"
+
+
+def test_typed_amount_is_the_price_not_the_quantity():
+    from tools.categorization_tool import parse_natural_language_expense
+
+    assert parse_natural_language_expense("bought 2 coffees for 300 at Starbucks")["amount"] == 300.0
+    assert parse_natural_language_expense("paid 1,200 for 3 movie tickets at PVR")["amount"] == 1200.0
+    assert parse_natural_language_expense("Uber 230 to college")["amount"] == 230.0
+
+
+def test_yesterday_and_today_are_understood():
+    from freezegun import freeze_time
+    from tools.categorization_tool import parse_natural_language_expense
+
+    with freeze_time("2026-11-01"):
+        assert parse_natural_language_expense("spent 450 on Swiggy yesterday")["date"] == "31-10-2026"
+        assert parse_natural_language_expense("spent 450 on Swiggy today")["date"] == "01-11-2026"

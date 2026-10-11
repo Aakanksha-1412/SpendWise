@@ -190,12 +190,13 @@ def parse_receipt_text(raw_text: str) -> Optional[Dict[str, Any]]:
     for line in lines:
         lower = line.lower()
         amounts = re.findall(_AMOUNT, line, re.IGNORECASE)
-        if "total" in lower and amounts:
+        is_total_line = "total" in lower or re.search(r"\b(amount\s+(payable|due|paid)|net\s+(amount|payable)|to\s+pay)\b", lower)
+        if is_total_line and amounts:
             # "Sub Total", "Total Qty: 3", "Total Items", "Total Savings" are not the amount paid
             if "sub" in lower or re.search(r"total\s*(qty|quantity|items?|savings?|saved|discount)", lower):
                 continue
             total = float(amounts[-1].replace(",", ""))
-            if re.search(r"\b(grand|net|payable)\b", lower):
+            if re.search(r"\b(grand|net|payable|due|to\s+pay)\b", lower):
                 grand_total = total
             continue
         # Dates, times, bill numbers, phone numbers and GSTIN contain digits but aren't prices
