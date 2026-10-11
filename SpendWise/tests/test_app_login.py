@@ -86,3 +86,22 @@ def test_account_with_demo_data_opens_on_the_dashboard():
 
     assert not app.exception
     assert any(t.value == "SPENDWISE" for t in app.title)
+
+
+def test_online_demo_notice_only_when_switched_on(monkeypatch):
+    app = AppTest.from_file(APP, default_timeout=60).run()
+    assert not any("Online demo" in i.value for i in app.info)
+
+    monkeypatch.setenv("SPENDWISE_ONLINE_DEMO", "true")
+    app = AppTest.from_file(APP, default_timeout=60).run()
+    assert any("Online demo" in i.value for i in app.info)
+
+
+def test_settings_can_come_from_streamlit_secrets(monkeypatch):
+    import utils.helpers as helpers
+
+    monkeypatch.delenv("GEMINI_MODEL", raising=False)
+    monkeypatch.setattr(helpers, "ENV_FILE_PATH", "no-such-file.env")
+    monkeypatch.setattr(helpers, "_streamlit_secret", lambda name: "from-secrets" if name == "GEMINI_MODEL" else None)
+
+    assert helpers.get_setting("GEMINI_MODEL") == "from-secrets"

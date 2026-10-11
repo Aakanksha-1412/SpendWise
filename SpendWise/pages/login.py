@@ -13,6 +13,7 @@ Responsibility:
 import streamlit as st
 
 from tools.auth_tool import create_user, has_unowned_data, unowned_data_summary, verify_user
+from utils.helpers import get_setting
 
 
 def _log_in(user_id: int, username: str) -> None:
@@ -66,7 +67,12 @@ def render_login_page() -> None:
                     else:
                         st.error(result)
 
-    st.caption("🔒 Passwords are stored only as secure hashes on this computer, never as plain text.")
+    st.caption("🔒 Passwords are stored only as secure hashes, never as plain text.")
+    if get_setting("SPENDWISE_ONLINE_DEMO").lower() in ("true", "1", "yes"):
+        st.info(
+            "🌐 **Online demo** — accounts and data may be reset when the server restarts, and uploaded "
+            "receipts are read by Google Gemini. Please don't enter real bank details or private bills."
+        )
 
 
 render_login_page()

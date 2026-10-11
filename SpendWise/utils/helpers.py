@@ -124,7 +124,8 @@ DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 
 def get_setting(name: str, default: str = "") -> str:
     """
-    Read a setting from real environment variables, else from SpendWise/.env.
+    Read a setting from real environment variables, else from SpendWise/.env, else from
+    Streamlit secrets (the "Secrets" box on Streamlit Community Cloud).
     (Use for GEMINI_API_KEY, GEMINI_MODEL, SPENDWISE_SEED_DEMO, TESSERACT_CMD_PATH, ...)
     The .env file is parsed again only when it changes, so editing it needs no restart.
     """
@@ -135,7 +136,19 @@ def get_setting(name: str, default: str = "") -> str:
         except OSError:
             modified_time = 0.0
         value = _env_file_values(ENV_FILE_PATH, modified_time).get(name)
+    if value is None:
+        value = _streamlit_secret(name)
     return (value if value is not None else default).strip()
+
+
+def _streamlit_secret(name: str) -> Optional[str]:
+    """A value from .streamlit/secrets.toml / the Cloud "Secrets" box, or None if there isn't one."""
+    try:
+        import streamlit as st
+
+        return str(st.secrets[name]) if name in st.secrets else None
+    except Exception:  # no secrets file (normal when running locally with .env)
+        return None
 
 
 @lru_cache(maxsize=4)

@@ -1,18 +1,20 @@
-# SpendWise — Official Python Dependencies (Python 3.10+)
-streamlit>=1.36.0
-pandas>=2.2.0
-plotly>=5.22.0
-python-dotenv>=1.0.1
+# SpendWise — Python dependencies (tested with Python 3.12)
+# Versions are pinned to the ones the automated tests pass with, so local runs and the
+# Streamlit Community Cloud deployment install exactly the same libraries.
+streamlit==1.65.0
+pandas==3.0.6
+plotly==7.1.0
+python-dotenv==1.2.4
 
-# Agentic Orchestration & LLM Integration
-langchain>=0.2.10
-langchain-core>=0.2.22
-langchain-google-genai>=1.0.7
-langgraph>=0.1.14
+# Agentic Orchestration & LLM Integration (LangChain / LangGraph / Gemini)
+langchain==1.4.4
+langchain-core==1.6.9
+langchain-google-genai==4.4.0
+langgraph==1.2.14
 
 # Vector Memory & Semantic Categorization
-chromadb>=0.5.4
+chromadb==1.5.9
 
 # Receipt OCR & Image Processing
-pillow>=10.4.0
-pytesseract>=0.3.10
+pillow==12.3.0
+pytesseract==0.3.13
