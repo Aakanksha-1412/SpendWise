@@ -160,6 +160,20 @@ python -m pytest agent/tests tests -v
 
 ---
 
+### Step 6 (optional): Deploy online (Streamlit Community Cloud, free)
+1. Sign in at **share.streamlit.io** with GitHub → **Create app** → *Deploy a public app from GitHub*.
+2. Repository `Aakanksha-1412/SpendWise`, branch `main`, main file path `SpendWise/app.py`.
+3. **Advanced settings** → Python version **3.12** → **Secrets**:
+   ```toml
+   GEMINI_API_KEY = "your-key"            # preferably a separate key just for the demo
+   GEMINI_MODEL = "gemini-3.5-flash-lite"
+   SPENDWISE_ONLINE_DEMO = "true"         # shows the "online demo" notice on the login page
+   ```
+4. **Deploy**. The first start takes a few minutes (installing libraries; ChromaDB downloads a ~80 MB model on first use).
+
+Notes: on the free plan the server can restart, which resets the SQLite data and accounts (fine for a
+demo). Everyone using the link shares the Gemini key's free daily limit.
+
 ## 5. Where Each Technology Is Used
 
 | Technology | Where | What it does |
