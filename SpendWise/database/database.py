@@ -11,7 +11,9 @@ Responsibility:
   demo always shows "this month" and "this week" data.
 - Set SPENDWISE_SEED_DEMO=false (in SpendWise/.env) to start with EMPTY tables and
   use only your real expenses. (Only affects a new/empty database: delete
-  data/spendwise.db to start over.)
+  data/spendwise.db to start over.) Demo data is also never added once the user has
+  saved a profile on the "My Profile" page.
+- Stores the user's profile (monthly income, savings goal) and usual monthly spending.
 - NOTE: UI pages (`pages/*.py`) must NEVER write raw SQL queries directly.
   All reads/writes go through `tools/database_tool.py`.
 """
@@ -43,7 +45,7 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     return conn
 
 
-def init_db(db_path: Optional[str] = None) -> None:
+def init_db(db_path: Optional[str] = None, allow_demo: bool = True) -> None:
     """
     Create the `transactions` and `budgets` tables if they do not exist,
     and populate initial demo records if the database is empty.
@@ -81,9 +83,32 @@ def init_db(db_path: Optional[str] = None) -> None:
         """
     )
 
+    # 3. The user's own profile (one row): monthly income + savings goal
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS profile (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            monthly_income REAL NOT NULL,
+            savings_goal REAL NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+    # 4. What the user usually spends per category in a month (used to suggest budgets)
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS usual_spending (
+            category TEXT PRIMARY KEY,
+            amount REAL NOT NULL
+        )
+        """
+    )
+
     conn.commit()
-    # Only look at the demo setting when there is something to fill (init_db runs on every query)
-    if _any_table_empty(conn) and seed_demo_enabled():
+    # Demo data only for a brand-new database: never once the user has set up a profile
+    # (init_db runs on every query, so the cheap checks come first)
+    if allow_demo and _any_table_empty(conn) and not _profile_exists(conn) and seed_demo_enabled():
         _seed_initial_data_if_empty(conn)
     conn.close()
 
@@ -94,6 +119,10 @@ def _any_table_empty(conn: sqlite3.Connection) -> bool:
         "SELECT (SELECT COUNT(*) FROM budgets) = 0 OR (SELECT COUNT(*) FROM transactions) = 0 AS empty"
     )
     return bool(cursor.fetchone()["empty"])
+
+
+def _profile_exists(conn: sqlite3.Connection) -> bool:
+    return conn.execute("SELECT COUNT(*) FROM profile").fetchone()[0] > 0
 
 
 def _demo_date(days_ago: int, current_period: bool) -> str:

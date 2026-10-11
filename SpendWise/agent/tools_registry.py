@@ -31,7 +31,7 @@ from tools.budget_tool import (
     suggest_discretionary_reallocation,
 )
 from tools.categorization_tool import categorize_expense
-from tools.database_tool import add_transaction, get_transactions
+from tools.database_tool import add_transaction, get_profile, get_transactions
 from tools.ocr_tool import extract_receipt
 from tools.spike_detector import detect_all_category_spikes, detect_spending_spike
 from utils.helpers import CATEGORIES, normalize_date, to_iso_date
@@ -95,6 +95,26 @@ def get_saving_suggestions() -> Dict[str, Any]:
     unused budget, with ready-made suggestions on where to cut back.
     Use for "where can I reduce spending?" or "how do I fix my shopping overspend?"."""
     return suggest_discretionary_reallocation()
+
+
+@tool
+def get_my_profile() -> Dict[str, Any]:
+    """Get the user's monthly income, savings goal, usual monthly spending per category, and
+    how much money is left this month after spending (income - spent so far).
+    Use for "how much can I still save?", "am I on track for my savings goal?",
+    "what is my income?"."""
+    summary = get_summary_metrics()
+    if summary["monthly_income"] is None:
+        return {"error": "The user hasn't entered their income yet. Ask them to fill in the 'My Profile' page."}
+    profile = get_profile()
+    return {
+        "monthly_income": summary["monthly_income"],
+        "savings_goal": summary["savings_goal"],
+        "spent_this_month": summary["total_spent"],
+        "left_after_spending": summary["saved_so_far"],
+        "savings_goal_on_track": summary["savings_on_track"],
+        "usual_spending": profile["usual_spending"],
+    }
 
 
 @tool
@@ -248,6 +268,7 @@ ALL_TOOLS = [
     get_all_budgets_overview,
     get_monthly_summary,
     get_saving_suggestions,
+    get_my_profile,
     check_spending_spike,
     check_all_spending_spikes,
     search_transactions,

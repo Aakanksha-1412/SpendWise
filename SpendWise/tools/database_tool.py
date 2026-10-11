@@ -259,3 +259,66 @@ def upsert_budget(category: str, monthly_budget: float, month: Optional[int] = N
     )
     conn.commit()
     conn.close()
+
+
+# ==============================================================================
+# USER PROFILE (income, savings goal, usual monthly spending)
+# ==============================================================================
+def get_profile() -> Optional[Dict[str, Any]]:
+    """
+    The user's profile, or None if they haven't set one up yet:
+    {"monthly_income": float, "savings_goal": float, "usual_spending": {category: float, ...}}
+    """
+    init_db()
+    conn = get_connection()
+    row = conn.execute("SELECT monthly_income, savings_goal FROM profile WHERE id = 1").fetchone()
+    usual = {cat: 0.0 for cat in CATEGORIES}
+    for r in conn.execute("SELECT category, amount FROM usual_spending"):
+        if r["category"] in usual:
+            usual[r["category"]] = float(r["amount"])
+    conn.close()
+    if row is None:
+        return None
+    return {
+        "monthly_income": float(row["monthly_income"]),
+        "savings_goal": float(row["savings_goal"]),
+        "usual_spending": usual,
+    }
+
+
+def save_profile(monthly_income: float, savings_goal: float, usual_spending: Dict[str, float]) -> None:
+    """Create or update the profile and the usual spending per category (missing = 0)."""
+    init_db(allow_demo=False)
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT INTO profile (id, monthly_income, savings_goal, updated_at) VALUES (1, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET monthly_income = excluded.monthly_income,
+            savings_goal = excluded.savings_goal, updated_at = excluded.updated_at
+        """,
+        (float(monthly_income), float(savings_goal), datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+    )
+    conn.executemany(
+        """
+        INSERT INTO usual_spending (category, amount) VALUES (?, ?)
+        ON CONFLICT(category) DO UPDATE SET amount = excluded.amount
+        """,
+        [(cat, float(usual_spending.get(cat, 0.0) or 0.0)) for cat in CATEGORIES],
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_all_data() -> int:
+    """
+    "Start fresh": delete ALL transactions and budgets (e.g. the demo data).
+    Returns how many transactions were removed. Save a profile right after, so demo data
+    is not added again.
+    """
+    init_db(allow_demo=False)
+    conn = get_connection()
+    removed = conn.execute("DELETE FROM transactions").rowcount
+    conn.execute("DELETE FROM budgets")
+    conn.commit()
+    conn.close()
+    return removed

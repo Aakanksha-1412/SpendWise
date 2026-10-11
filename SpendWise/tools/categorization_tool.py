@@ -150,6 +150,12 @@ def semantic_category(merchant: str, description: str = "") -> Optional[str]:
     if memory is None or not queries:
         return None
     try:
+        # 1. A shop the user already saved: exact lookup by name (no similarity search needed)
+        if merchant.strip():
+            exact = memory.get(ids=[f"merchant:{merchant.strip().lower()}"])
+            if exact["ids"]:
+                return exact["metadatas"][0]["category"]
+        # 2. Otherwise: closest meaning among learned shops and category descriptions
         result = memory.query(query_texts=queries, n_results=5)
     except Exception as exc:
         logger.warning("ChromaDB query failed: %r", exc)

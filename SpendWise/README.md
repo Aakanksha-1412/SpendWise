@@ -52,7 +52,8 @@ SpendWise/
 │   ├── upload.py                 # CSV bulk importer + Receipt OCR extraction pipeline UI
 │   ├── budget.py                 # Monthly category budget configuration & status cards
 │   ├── analytics.py              # 6 Plotly financial charts + Automated Spike Detection banner
-│   └── assistant.py              # Ask SpendWise AI chat interface with LangGraph trace viewer
+│   ├── assistant.py              # Ask SpendWise AI chat interface with LangGraph trace viewer
+│   └── profile.py                # My Profile & Setup: income, savings goal, usual spending, start fresh
 │
 ├── agent/                        # Member 1: LangGraph Agentic Orchestrator
 │   ├── graph.py                  # Gemini + LangGraph loop (agent ⇄ tools), run_agent() entry point
@@ -169,6 +170,12 @@ python -m pytest agent/tests tests -v
 | **ChromaDB** | `tools/categorization_tool.py` | Semantic merchant memory: "Chai Point" → Food; learns from saved expenses |
 | **Plotly** | `pages/home.py`, `pages/analytics.py` | Interactive charts |
 | **Memory** | `agent/memory.py` + SQLite + ChromaDB | Chat follow-ups ("yes, log it"), stored data, learned merchants |
+
+### Using your own data
+Open **👤 My Profile & Setup**, enter your monthly income, savings goal and usual spending per
+category, keep **Start fresh** ticked, and click **Save & create my budgets**. The demo data is removed
+(and never added again), and this month's budgets are created from your usual spending, trimmed
+(Food/Shopping/Entertainment/Others first) if it's more than income − savings goal.
 
 ### Known limits
 - Free Gemini tier: about 5 requests/minute and 20/day per model (one question = 2–3 requests).

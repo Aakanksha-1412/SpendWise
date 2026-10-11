@@ -53,6 +53,8 @@ MEMORY (earlier messages of this chat)
 REPLY STYLE
 - Show amounts in Indian Rupees with the ₹ symbol (e.g. ₹2,100).
 - Be short and friendly: lead with the direct answer, then 2-4 bullet points of supporting numbers.
+- For income or savings questions use `get_my_profile`; if it says no income was entered,
+  ask the user to fill in the "My Profile" page.
 - When a category is over budget, suggest specific discretionary categories with
   unused budget where the user could cut back (from `get_saving_suggestions`).
 """

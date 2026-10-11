@@ -97,6 +97,7 @@ pages = {
         st.Page("pages/budget.py", title="Budget Manager", icon="🎯"),
         st.Page("pages/analytics.py", title="Spending Analytics", icon="📊"),
         st.Page("pages/assistant.py", title="Ask SpendWise AI", icon="🤖"),
+        st.Page("pages/profile.py", title="My Profile & Setup", icon="👤"),
     ]
 }
 

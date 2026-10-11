@@ -63,13 +63,29 @@ def render_home_page() -> None:
     # 3. SUMMARY KPI CARDS
     # -------------------------------------------------------------------------
     summary = get_summary_metrics()
+
+    if summary["monthly_income"] is None:
+        banner_col, button_col = st.columns([4, 1])
+        with banner_col:
+            st.info("👋 These are **demo numbers**. Add your own income and usual spending to get your real budgets.")
+        with button_col:
+            if st.button("👤 Set up my profile", width="stretch", type="primary"):
+                st.switch_page("pages/profile.py")
+    else:
+        on_track = summary["savings_on_track"]
+        st.markdown(
+            f"**💰 Income:** {format_inr(summary['monthly_income'])} · "
+            f"**Left after spending:** {format_inr(summary['saved_so_far'])} · "
+            f"**Savings goal:** {format_inr(summary['savings_goal'])} "
+            + ("✅ on track" if on_track else "⚠️ not on track — spending is eating into your savings goal")
+        )
     kpi_cols = st.columns(4)
 
     with kpi_cols[0]:
         st.markdown(
             f"""
             <div class="sw-card">
-                <div class="sw-kpi-label">Total Spent (Oct 2026)</div>
+                <div class="sw-kpi-label">Total Spent ({period_label()})</div>
                 <div class="sw-kpi-value">{format_inr(summary['total_spent'])}</div>
                 <div class="sw-kpi-sub">Across 8 active categories</div>
             </div>

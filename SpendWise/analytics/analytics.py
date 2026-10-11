@@ -24,7 +24,7 @@ except ImportError:
     pd = None  # type: ignore
     PANDAS_AVAILABLE = False
 
-from tools.database_tool import get_transactions_df
+from tools.database_tool import get_profile, get_transactions_df
 from tools.budget_tool import get_all_budget_statuses, suggest_discretionary_reallocation
 from tools.spike_detector import detect_all_category_spikes
 from utils.helpers import CATEGORIES, resolve_period
@@ -43,6 +43,12 @@ def get_summary_metrics(month: Optional[int] = None, year: Optional[int] = None)
     near_limit_list = [item for item in statuses if item["status"] == "NEAR LIMIT"]
     spikes = [s for s in detect_all_category_spikes() if s["spike_detected"]]
 
+    # Income & savings (None until the user saves a profile on the "My Profile" page)
+    profile = get_profile()
+    income = profile["monthly_income"] if profile else None
+    savings_goal = profile["savings_goal"] if profile else None
+    saved_so_far = round(income - total_spent, 2) if profile else None
+
     return {
         "total_spent": round(total_spent, 2),
         "monthly_budget": round(total_budget, 2),
@@ -51,6 +57,10 @@ def get_summary_metrics(month: Optional[int] = None, year: Optional[int] = None)
         "over_budget_categories": over_budget_list,
         "near_limit_categories": near_limit_list,
         "detected_spikes": spikes,
+        "monthly_income": income,
+        "savings_goal": savings_goal,
+        "saved_so_far": saved_so_far,  # income - spent this month
+        "savings_on_track": (saved_so_far >= savings_goal) if profile else None,
     }
 
 

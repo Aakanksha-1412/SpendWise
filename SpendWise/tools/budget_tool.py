@@ -12,6 +12,7 @@ Responsibility:
   can reduce spending when another category exceeds its monthly limit.
 """
 
+import math
 from typing import Any, Dict, List, Optional
 from tools.database_tool import get_all_budgets, get_category_spending, get_spending_by_category
 from utils.helpers import CATEGORIES, DISCRETIONARY_CATEGORIES, format_inr
@@ -120,3 +121,44 @@ def suggest_discretionary_reallocation(month: Optional[int] = None, year: Option
         "total_discretionary_buffer": total_discretionary_buffer,
         "suggestions": suggestions,
     }
+
+
+# Starting shares used only when the user gave no usual spending at all
+DEFAULT_BUDGET_SHARES: Dict[str, float] = {
+    "Food": 5000, "Transport": 3000, "Shopping": 4000, "Entertainment": 2000,
+    "Bills": 3500, "Healthcare": 1500, "Education": 4000, "Others": 1500,
+}
+
+
+def suggest_budgets(monthly_income: float, savings_goal: float, usual_spending: Dict[str, float]) -> Dict[str, float]:
+    """
+    Suggest a monthly budget per category from the user's profile.
+    - Money available to spend = income - savings goal.
+    - If usual spending fits, each budget = usual spending.
+    - If it doesn't fit, discretionary "wants" (Food, Shopping, Entertainment, Others) are
+      trimmed first; essentials (Bills, Transport, Healthcare, Education) only if still needed.
+    - With no usual spending given, the available money is split using DEFAULT_BUDGET_SHARES.
+    """
+    available = max(float(monthly_income) - float(savings_goal), 0.0)
+    usual = {cat: max(float(usual_spending.get(cat, 0.0) or 0.0), 0.0) for cat in CATEGORIES}
+    total = sum(usual.values())
+
+    if total == 0:
+        weight_sum = sum(DEFAULT_BUDGET_SHARES.values())
+        return {cat: float(math.floor(available * DEFAULT_BUDGET_SHARES[cat] / weight_sum / 50) * 50) for cat in CATEGORIES}
+    if total <= available:
+        return {cat: round(amount, 2) for cat, amount in usual.items()}
+
+    overflow = total - available
+    wants_total = sum(usual[cat] for cat in DISCRETIONARY_CATEGORIES)
+    budgets = dict(usual)
+    if wants_total >= overflow:
+        factor = (wants_total - overflow) / wants_total
+        for cat in DISCRETIONARY_CATEGORIES:
+            budgets[cat] = float(math.floor(usual[cat] * factor))
+    else:
+        needs_total = total - wants_total
+        factor = available / needs_total if needs_total else 0.0
+        for cat in CATEGORIES:
+            budgets[cat] = 0.0 if cat in DISCRETIONARY_CATEGORIES else float(math.floor(usual[cat] * factor))
+    return budgets

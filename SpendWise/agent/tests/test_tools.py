@@ -47,3 +47,17 @@ def test_affordability_with_no_budget_set_does_not_say_over_budget(monkeypatch):
 
     assert result["can_afford"] is None
     assert result["no_budget_set"] is True
+
+
+def test_profile_tool_tells_gemini_income_and_savings():
+    from agent.tools_registry import get_my_profile
+    from tools.database_tool import save_profile
+
+    assert "error" in get_my_profile.invoke({})  # no profile yet
+
+    save_profile(monthly_income=20000, savings_goal=3000, usual_spending={"Food": 4000})
+    result = get_my_profile.invoke({})
+
+    assert result["monthly_income"] == 20000
+    assert result["savings_goal"] == 3000
+    assert "left_after_spending" in result
