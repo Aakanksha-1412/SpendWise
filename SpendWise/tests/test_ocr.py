@@ -76,3 +76,13 @@ def test_amount_payable_line_is_read_as_the_total():
     fields = parse_receipt_text(chr(10).join(["CAFE X", "Tea 40.00", "Amount Payable 40.00"]))
 
     assert fields["total"] == 40.0
+
+
+def test_detects_when_a_receipt_date_is_outside_the_current_month():
+    from freezegun import freeze_time
+    from utils.helpers import is_in_current_month
+
+    with freeze_time("2026-10-11"):
+        assert is_in_current_month("05-10-2026") is True
+        assert is_in_current_month("03-03-2026") is False  # old bill
+        assert is_in_current_month("not a date") is False

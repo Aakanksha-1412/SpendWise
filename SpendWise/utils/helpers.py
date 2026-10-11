@@ -146,3 +146,13 @@ def _env_file_values(path: str, modified_time: float) -> Dict[str, Optional[str]
     except ImportError:
         return {}
     return dotenv_values(path) if modified_time else {}
+
+
+def is_in_current_month(date_str: str) -> bool:
+    """True if a DD-MM-YYYY (or other common format) date is in the current month."""
+    try:
+        parsed = datetime.strptime(normalize_date(date_str or ""), "%d-%m-%Y")
+    except ValueError:
+        return False
+    now = datetime.now()
+    return parsed.month == now.month and parsed.year == now.year

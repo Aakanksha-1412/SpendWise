@@ -11,6 +11,8 @@ Responsibility:
   Image -> OCR -> Extract (Merchant, Date, Items, Tax, Total) -> Categorization -> SQLite.
 """
 
+from datetime import datetime
+
 import streamlit as st
 import pandas as pd
 
@@ -19,7 +21,7 @@ from tools.ocr_tool import extract_receipt
 from tools.categorization_tool import merchant_memory_version
 from tools.csv_import_tool import import_rows, read_transactions_csv
 from tools.database_tool import add_transaction
-from utils.helpers import CATEGORIES, format_inr
+from utils.helpers import CATEGORIES, format_inr, is_in_current_month
 
 
 @st.cache_data(show_spinner="Reading and categorizing transactions...")
@@ -104,11 +106,23 @@ def render_upload_page() -> None:
             if not ocr_data.get("read_ok", True):
                 st.warning("⚠️ This receipt couldn't be read automatically. Please type the merchant, date and total below.")
 
+            # An old bill (e.g. dated March, paid now) must not silently land in another month
+            today_str = datetime.now().strftime("%d-%m-%Y")
+            old_receipt_date = ocr_data.get("read_ok", True) and not is_in_current_month(ocr_data["date"])
+
             with st.form("confirm_ocr_form"):
                 e_col1, e_col2 = st.columns(2)
                 with e_col1:
                     merchant = st.text_input("Merchant", value=ocr_data["merchant"])
-                    date_val = st.text_input("Date (DD-MM-YYYY)", value=ocr_data["date"])
+                    if old_receipt_date:
+                        date_choice = st.radio(
+                            "📅 Which date should this expense have?",
+                            [f"Today ({today_str})", f"Date on the bill ({ocr_data['date']})"],
+                            help="The date printed on the receipt isn't in this month. Choose 'Today' if you're paying it now.",
+                        )
+                        date_val = today_str if date_choice.startswith("Today") else ocr_data["date"]
+                    else:
+                        date_val = st.text_input("Date (DD-MM-YYYY)", value=ocr_data["date"])
                     category = st.selectbox(
                         "Auto-Assigned Category",
                         CATEGORIES,
