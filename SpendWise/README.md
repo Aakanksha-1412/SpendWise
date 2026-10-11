@@ -1,6 +1,6 @@
 # SPENDWISE — Autonomous Personal Financial Expense & Budgeting Assistant
 
-An Agentic AI personal financial expense and budgeting assistant built with **Python 3.10+**, **Streamlit**, **LangChain / LangGraph**, **SQLite3**, **Pandas**, **Tesseract OCR / Vision LLM**, **ChromaDB**, and **Plotly**.
+An Agentic AI personal financial expense and budgeting assistant built with **Python 3.12** (3.11 minimum), **Streamlit**, **LangChain / LangGraph**, **SQLite3**, **Pandas**, **Tesseract OCR / Vision LLM**, **ChromaDB**, and **Plotly**.
 
 ---
 
@@ -114,6 +114,8 @@ To prevent merge conflicts, each team member owns dedicated modules and communic
 ## 4. Setup & Installation Instructions
 
 ### Step 1: Clone the Repository & Create a Virtual Environment
+> Requires **Python 3.12** (3.11 also works; 3.10 does **not**, because pandas 3 needs 3.11+). Check with `python --version`.
+
 ```bash
 git clone <your-team-repo-url>
 cd SpendWise
