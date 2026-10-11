@@ -48,7 +48,7 @@ def understand_request_node(state: AgentState) -> AgentState:
             detected_cat = cat
             break
     if not detected_cat:
-        inferred = categorize_expense("", query)
+        inferred = categorize_expense("", query, use_semantic=False)  # a question, not a shop name
         if inferred != "Others":
             detected_cat = inferred
 
@@ -195,7 +195,8 @@ def call_tool_node(state: AgentState) -> AgentState:
         if tool_name == "ocr_tool.extract_receipt":
             receipt_data = extract_receipt(state.get("uploaded_receipt"), filename_hint=query)
             if not receipt_data.get("read_ok", True):
-                continue  # unreadable photo: save nothing, the reply asks for merchant + amount
+                outputs["receipt_unreadable"] = True  # save nothing; the reply explains
+                continue
             # If user mentioned a specific amount in the prompt, override demo amount
             amt_match = re.search(r"(?:₹|rs\.?|inr\s*)\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)", query, re.IGNORECASE)
             if amt_match:
@@ -349,6 +350,11 @@ def generate_response_node(state: AgentState) -> AgentState:
                 f"- **Monthly Budget:** {format_inr(b_stat.get('budget', 0))}\n"
                 f"- **Total Spent:** {format_inr(b_stat.get('spent', 0))} ({b_stat.get('utilization_pct', 0)}%)\n"
                 f"- **Remaining Budget:** **{format_inr(b_stat.get('remaining', 0))}** (`{b_stat.get('status', 'OK')}`)"
+            )
+        elif outputs.get("receipt_unreadable"):
+            response = (
+                "I couldn't read that receipt photo. Please type the merchant and amount "
+                "(for example: *'Add ₹471 at Behrouz Biryani for food'*) or try a clearer photo."
             )
         else:
             response = (

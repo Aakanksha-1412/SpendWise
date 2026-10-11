@@ -199,7 +199,7 @@ def parse_receipt_text(raw_text: str) -> Optional[Dict[str, Any]]:
                 grand_total = total
             continue
         # Dates, times, bill numbers, phone numbers and GSTIN contain digits but aren't prices
-        if re.search(date_pattern, line) or re.match(r"(date|time|bill|invoice|order|table|phone|ph|tel|mob|gstin|fssai)\b", lower):
+        if re.search(date_pattern, line) or re.match(r"(date|time|bill|invoice|order|table|phone|ph|tel|mob|gstin|gst\s*(no|number|reg)|fssai)\b", lower):
             continue
         if not amounts:
             continue

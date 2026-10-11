@@ -180,6 +180,36 @@ def get_category_spending(category: str, month: Optional[int] = None, year: Opti
     return round(total, 2)
 
 
+def get_spending_by_category(month: Optional[int] = None, year: Optional[int] = None) -> Dict[str, float]:
+    """
+    Total spending per official category for a month (default: this month), loading the
+    transactions only ONCE. Same rules as get_category_spending (category name ignores case).
+    """
+    month, year = resolve_period(month, year)
+    totals = {cat: 0.0 for cat in CATEGORIES}
+    by_lower = {cat.lower(): cat for cat in CATEGORIES}
+    if PANDAS_AVAILABLE:
+        df = get_transactions_df()
+        if df.empty:
+            return totals
+        df["parsed_date"] = pd.to_datetime(df["date"], format="%d-%m-%Y", errors="coerce")
+        month_df = df[(df["parsed_date"].dt.month == month) & (df["parsed_date"].dt.year == year)]
+        for category, amount in month_df.groupby(month_df["category"].str.strip().str.lower())["amount"].sum().items():
+            if category in by_lower:
+                totals[by_lower[category]] = float(amount)
+        return totals
+
+    for r in get_transactions():
+        official = by_lower.get(r["category"].strip().lower())
+        try:
+            dt = datetime.strptime(r["date"], "%d-%m-%Y")
+        except ValueError:
+            continue
+        if official and dt.month == month and dt.year == year:
+            totals[official] += float(r["amount"])
+    return {cat: round(total, 2) for cat, total in totals.items()}
+
+
 def get_all_budgets(month: Optional[int] = None, year: Optional[int] = None) -> Dict[str, float]:
     """
     Retrieve monthly budget allocations for all categories for the given month (default: this month).

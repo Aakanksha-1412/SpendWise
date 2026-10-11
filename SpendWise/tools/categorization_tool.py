@@ -80,18 +80,25 @@ CATEGORY_DESCRIPTIONS: Dict[str, list[str]] = {
     "Education": ["online course learning classes", "college fees tuition exam", "coaching test preparation", "textbooks study material"],
 }
 
-# Cosine distance: 0 = same meaning, 1 = unrelated. Above this, the match isn't trusted
-# and the expense stays "Others" (e.g. "XYZ Traders" has no meaningful words).
-SEMANTIC_MATCH_MAX_DISTANCE = 0.72
+# Cosine distance: 0 = same meaning, 1 = unrelated. Above these limits a match isn't trusted
+# and the expense stays "Others".
+# - Category descriptions have real meaning ("tea chai coffee"), so a looser limit works.
+# - Learned merchant NAMES are mostly meaningless brand names: unrelated names still score
+#   ~0.6 ("XYZ Traders" vs "Zomato"), while the same shop spelled differently scores <= 0.25
+#   ("Physics Wallah" vs "PhysicsWallah"). So learned names must be nearly identical.
+DESCRIPTION_MATCH_MAX_DISTANCE = 0.62
+LEARNED_NAME_MATCH_MAX_DISTANCE = 0.35
 _PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _open_memories: Dict[str, Any] = {}
+_memory_version = 0  # goes up whenever a merchant is learned (lets callers refresh caches)
 
 
-def categorize_expense(merchant: str, description: str = "") -> str:
+def categorize_expense(merchant: str, description: str = "", use_semantic: bool = True) -> str:
     """
     Categorize an expense based on merchant name and description:
     1. Fast keyword lookup (MERCHANT_CATEGORY_KEYWORDS).
-    2. If no keyword matches: ChromaDB semantic memory (learned merchants + category descriptions).
+    2. If no keyword matches and use_semantic: ChromaDB semantic memory
+       (learned merchants + category descriptions).
     3. Otherwise "Others".
     """
     combined_text = f"{merchant} {description}".lower().strip()
@@ -101,7 +108,14 @@ def categorize_expense(merchant: str, description: str = "") -> str:
             if kw in combined_text:
                 return category
 
+    if not use_semantic:
+        return "Others"
     return semantic_category(merchant, description) or "Others"
+
+
+def merchant_memory_version() -> int:
+    """A number that changes every time ChromaDB learns a merchant."""
+    return _memory_version
 
 
 def _merchant_memory():
@@ -136,21 +150,18 @@ def semantic_category(merchant: str, description: str = "") -> Optional[str]:
     if memory is None or not queries:
         return None
     try:
-        result = memory.query(query_texts=queries, n_results=1)
+        result = memory.query(query_texts=queries, n_results=5)
     except Exception as exc:
         logger.warning("ChromaDB query failed: %r", exc)
         return None
-    best = min(
-        (
-            (distances[0], metadatas[0]["category"])
-            for distances, metadatas in zip(result["distances"], result["metadatas"])
-            if distances
-        ),
-        default=None,
-    )
-    if best is None or best[0] > SEMANTIC_MATCH_MAX_DISTANCE:
-        return None
-    return best[1]
+    limits = {"description": DESCRIPTION_MATCH_MAX_DISTANCE, "learned": LEARNED_NAME_MATCH_MAX_DISTANCE}
+    trusted = [
+        (distance, metadata["category"])
+        for distances, metadatas in zip(result["distances"], result["metadatas"])
+        for distance, metadata in zip(distances, metadatas)
+        if distance <= limits.get(metadata.get("kind"), 0.0)
+    ]
+    return min(trusted)[1] if trusted else None
 
 
 def remember_merchant_category(merchant: str, category: str) -> None:
@@ -173,12 +184,14 @@ def remember_merchant_categories(pairs: List[Tuple[str, str]]) -> None:
     memory = _merchant_memory()
     if memory is None:
         return
+    global _memory_version
     try:
         memory.upsert(
             ids=[f"merchant:{key}" for key in learned],
             documents=[name for name, _ in learned.values()],
             metadatas=[{"category": category, "kind": "learned"} for _, category in learned.values()],
         )
+        _memory_version += 1
     except Exception as exc:
         logger.warning("ChromaDB could not remember %d merchants: %r", len(learned), exc)
 
@@ -214,7 +227,8 @@ def parse_natural_language_expense(user_text: str) -> Dict[str, Any]:
                     merchant = kw.title()
                     break
 
-    category = categorize_expense(merchant, user_text)
+    # The "General Merchant" filler isn't a real name, so it must not influence the category
+    category = categorize_expense("" if merchant == "General Merchant" else merchant, user_text)
 
     return {
         "date": tx_date,

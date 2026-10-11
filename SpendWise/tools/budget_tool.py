@@ -13,7 +13,7 @@ Responsibility:
 """
 
 from typing import Any, Dict, List, Optional
-from tools.database_tool import get_all_budgets, get_category_spending
+from tools.database_tool import get_all_budgets, get_category_spending, get_spending_by_category
 from utils.helpers import CATEGORIES, DISCRETIONARY_CATEGORIES, format_inr
 
 
@@ -36,6 +36,11 @@ def calculate_budget_status(category: str, month: Optional[int] = None, year: Op
     budgets = get_all_budgets(month=month, year=year)
     budget_amt = float(budgets.get(category, 0.0))
     spent_amt = float(get_category_spending(category, month=month, year=year))
+    return _status(category, budget_amt, spent_amt)
+
+
+def _status(category: str, budget_amt: float, spent_amt: float) -> Dict[str, Any]:
+    """Budget status dict from a budget and an amount spent (shared by single + overview)."""
     remaining_amt = round(budget_amt - spent_amt, 2)
     utilization_pct = round((spent_amt / budget_amt * 100.0), 1) if budget_amt > 0 else 0.0
 
@@ -60,9 +65,12 @@ def calculate_budget_status(category: str, month: Optional[int] = None, year: Op
 
 def get_all_budget_statuses(month: Optional[int] = None, year: Optional[int] = None) -> List[Dict[str, Any]]:
     """
-    Return budget status dictionaries for all 8 official SpendWise categories.
+    Return budget status dictionaries for all 8 official SpendWise categories
+    (budgets and transactions are loaded once, not once per category).
     """
-    return [calculate_budget_status(cat, month=month, year=year) for cat in CATEGORIES]
+    budgets = get_all_budgets(month=month, year=year)
+    spending = get_spending_by_category(month=month, year=year)
+    return [_status(cat, float(budgets.get(cat, 0.0)), float(spending.get(cat, 0.0))) for cat in CATEGORIES]
 
 
 def suggest_discretionary_reallocation(month: Optional[int] = None, year: Optional[int] = None) -> Dict[str, Any]:

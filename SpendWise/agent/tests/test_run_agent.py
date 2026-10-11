@@ -79,3 +79,13 @@ def test_demo_mode_reports_the_current_month_not_october(no_gemini):
     assert result["mode"] == "fallback"
     assert "November 2026" in result["response"]
     assert "**Actual Spent:** **₹400**" in result["response"]  # not October's demo ₹3,000
+
+
+def test_demo_mode_says_when_a_receipt_photo_could_not_be_read(no_gemini, monkeypatch):
+    monkeypatch.setenv("TESSERACT_CMD_PATH", "")
+    monkeypatch.setattr("shutil.which", lambda name: None)
+
+    result = run_agent("add this receipt and tell me my food budget", uploaded_receipt=b"not-an-image")
+
+    assert result["mode"] == "fallback"
+    assert "couldn't read" in result["response"]

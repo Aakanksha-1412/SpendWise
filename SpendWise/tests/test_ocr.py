@@ -61,3 +61,12 @@ def test_quantity_line_after_grand_total_does_not_replace_it():
     fields = parse_receipt_text(text)
 
     assert fields["total"] == 150.0
+
+
+def test_gst_number_line_is_not_counted_as_tax():
+    text = chr(10).join(["CHAI POINT", "GST No: 29ABCDE1234F1Z5", "Masala Chai 120.00", "CGST 2.5% 3.00", "SGST 2.5% 3.00", "Grand Total 126.00"])
+
+    fields = parse_receipt_text(text)
+
+    assert fields["tax"] == 6.0
+    assert fields["total"] == 126.0

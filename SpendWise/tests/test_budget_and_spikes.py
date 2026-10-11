@@ -39,3 +39,15 @@ def test_demo_data_shows_the_food_spike_on_any_date():
     assert spike["previous_weekly_spending"] == 1500.0
     assert spike["current_weekly_spending"] == 3000.0
     assert spike["spike_detected"] is True
+
+
+def test_overview_matches_each_single_category_status():
+    from tools.budget_tool import get_all_budget_statuses
+
+    database.init_db()
+    add_transaction({"merchant": "Zomato", "amount": 250, "category": "Food", "date": ""})
+
+    overview = {status["category"]: status for status in get_all_budget_statuses()}
+
+    for category, status in overview.items():
+        assert status == calculate_budget_status(category)

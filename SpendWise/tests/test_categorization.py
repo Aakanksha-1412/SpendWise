@@ -39,3 +39,42 @@ def test_csv_import_teaches_merchants_too():
 
     assert categorize_expense("Quixotic Tutors") == "Education"
     assert categorize_expense("Wobbly Pans") == "Food"
+
+
+def test_typed_expense_without_a_shop_name_is_not_guessed_as_shopping():
+    from tools.categorization_tool import parse_natural_language_expense
+
+    assert parse_natural_language_expense("spent 200 yesterday")["category"] == "Others"
+    assert parse_natural_language_expense("paid 150")["category"] == "Others"
+
+
+def test_keyword_only_mode_skips_chromadb():
+    assert categorize_expense("Chai Point", use_semantic=False) == "Others"
+    assert categorize_expense("Swiggy", use_semantic=False) == "Food"
+
+
+def test_memory_version_changes_when_a_merchant_is_learned():
+    from tools.categorization_tool import merchant_memory_version, remember_merchant_category
+
+    before = merchant_memory_version()
+    remember_merchant_category("Fizzwick Books", "Education")
+
+    assert merchant_memory_version() > before
+
+
+def test_a_learned_shop_name_does_not_pull_in_unrelated_names():
+    from tools.categorization_tool import remember_merchant_category
+
+    remember_merchant_category("Zomato", "Food")
+    remember_merchant_category("Wobbly Pans", "Food")
+
+    assert categorize_expense("XYZ Traders") == "Others"
+    assert categorize_expense("Sharma Enterprises") == "Others"
+
+
+def test_a_learned_shop_matches_small_spelling_differences():
+    from tools.categorization_tool import remember_merchant_category
+
+    remember_merchant_category("Quillfeather Academy", "Education")
+
+    assert categorize_expense("Quillfeather academy") == "Education"
