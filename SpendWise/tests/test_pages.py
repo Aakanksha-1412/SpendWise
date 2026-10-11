@@ -65,3 +65,19 @@ def test_home_shows_income_and_savings_after_setup():
     assert not app.exception
     assert "Income:" in text and "₹20,000" in text and "₹19,000" in text
     assert not any("demo numbers" in i.value for i in app.info)
+
+
+def test_editing_the_profile_keeps_budgets_changed_on_the_budget_page():
+    from tools.database_tool import get_all_budgets, get_profile, remove_all_data, save_profile, upsert_budget
+
+    save_profile(15000, 2000, {"Food": 4000})
+    remove_all_data()
+    upsert_budget("Food", 7500)  # changed on the Budget page
+
+    app = AppTest.from_file(str(PAGES / "profile.py"), default_timeout=60).run()
+    assert app.checkbox(key="profile_update_budgets").value is False  # not ticked when editing
+    app.number_input(key="profile_income").set_value(18000.0)
+    next(b for b in app.button if b.label == "Save").click().run()
+
+    assert get_profile()["monthly_income"] == 18000.0
+    assert get_all_budgets()["Food"] == 7500.0  # untouched

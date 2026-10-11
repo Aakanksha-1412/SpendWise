@@ -107,6 +107,9 @@ def render_profile_form(profile) -> None:
             )
 
         st.markdown("##### 2. How much do you usually spend in a month? (rough guess is fine)")
+        st.caption(
+            "Used to suggest your starting budgets. To change a budget later, use the 🎯 Budget page."
+        )
         cols = st.columns(4)
         usual = {}
         for idx, cat in enumerate(CATEGORIES):
@@ -117,10 +120,16 @@ def render_profile_form(profile) -> None:
                     key=f"profile_usual_{cat}",
                 )
 
-        update_budgets = st.checkbox(
-            f"Set my {period_label()} budgets from this (you can still change them on the Budget page)",
-            value=True, key="profile_update_budgets",
-        )
+        if profile is None:
+            update_budgets = True  # first setup: starting budgets always come from usual spending
+            st.caption(f"Your {period_label()} budgets will be created from this. You can change them on the Budget page.")
+        else:
+            # Editing later must not silently overwrite budgets changed on the Budget page
+            update_budgets = st.checkbox(
+                f"Also replace ALL my {period_label()} budgets with suggestions from this "
+                "(this overwrites changes you made on the Budget page)",
+                value=False, key="profile_update_budgets",
+            )
         start_fresh = False
         if get_transactions():
             start_fresh = st.checkbox(

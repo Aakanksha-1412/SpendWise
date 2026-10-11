@@ -20,7 +20,10 @@ from utils.helpers import CATEGORIES, format_inr, period_label
 
 def render_budget_page() -> None:
     st.title("🎯 Monthly Budget Configuration")
-    st.caption(f"Define category-wise monthly budgets for {period_label()} and monitor real-time utilization.")
+    st.caption(
+        f"This is the place to set or change your budgets for {period_label()}. "
+        "Your starting budgets were suggested from the usual spending on your 👤 Profile."
+    )
 
     statuses = get_all_budget_statuses()
 
