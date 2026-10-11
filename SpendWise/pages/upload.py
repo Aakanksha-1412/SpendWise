@@ -83,6 +83,13 @@ def render_upload_page() -> None:
             key="receipt_uploader",
         )
 
+        # A different photo (or removing it) clears the previous result, so old fields
+        # (e.g. the demo receipt) are never shown under a new, not-yet-read photo.
+        current_upload = uploaded_image.file_id if uploaded_image is not None else None
+        if st.session_state.get("ocr_upload_id") != current_upload:
+            st.session_state["ocr_upload_id"] = current_upload
+            st.session_state.pop("ocr_result", None)
+
         if st.button("Run Demo Receipt Extraction (No File Needed)", width="stretch"):
             st.session_state["ocr_result"] = extract_receipt(None, filename_hint="starbucks_receipt.jpg")
 
