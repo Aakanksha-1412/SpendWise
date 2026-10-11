@@ -8,11 +8,20 @@ An Agentic AI personal financial expense and budgeting assistant built with **Py
 
 Unlike basic CRUD expense trackers with a bolted-on chatbot, **SpendWise** is designed around an **Agentic AI Orchestrator** (`agent/graph.py`). When a user submits a natural-language request, CSV statement, or receipt image, the central LangGraph controller:
 
-1. **Understands the Request** (`understand_request_node`)
-2. **Decides Required Tool(s)** (`decide_required_tool_node`)
-3. **Calls Deterministic Tools** (`call_tool_node` -> OCR, Categorization, SQLite, Pandas Budget & Spike Detector)
-4. **Evaluates Results** (`evaluate_result_node` -> checks overruns, thresholds, and discretionary buffers)
-5. **Generates Final Response / Alert / Suggestion** (`generate_response_node`)
+1. **Understands the request**: Gemini reads the message (plus the recent chat for follow-ups).
+2. **Decides which tool(s) to call**: Gemini chooses from 11 tools (`agent/tools_registry.py`) by function calling.
+3. **Calls the tools**: LangGraph's `ToolNode` runs plain Python (OCR, categorization, SQLite, Pandas budget & spike detection).
+4. **Evaluates the results**: the results go back to Gemini, which calls more tools if needed (a loop).
+5. **Generates the final response / alert / suggestion**: every number comes from a tool, never from the LLM.
+
+```text
+START → [agent] Gemini decides ── tool requested? ── yes → [tools] Python runs it ──┐
+           ▲                                       └─ no  → END (final answer)     │
+           └──────────────────────── tool results go back to Gemini ◄──────────────┘
+```
+
+If Gemini is unavailable (no key, no internet, free-tier limit), the app falls back to a clearly
+labelled keyword-based **Demo mode** (`agent/fallback_agent.py`) so it never breaks.
 
 ```text
 Input Ingestion (Text / Image / CSV)
@@ -43,17 +52,25 @@ SpendWise/
 │   ├── upload.py                 # CSV bulk importer + Receipt OCR extraction pipeline UI
 │   ├── budget.py                 # Monthly category budget configuration & status cards
 │   ├── analytics.py              # 6 Plotly financial charts + Automated Spike Detection banner
-│   └── assistant.py              # Ask SpendWise AI chat interface with LangGraph trace viewer
+│   ├── assistant.py              # Ask SpendWise AI chat interface with LangGraph trace viewer
+│   ├── profile.py                # My Profile & Money Plan: income, savings goal, usual spending, charts
+│   └── login.py                  # Log in / create account (shown until someone logs in)
 │
 ├── agent/                        # Member 1: LangGraph Agentic Orchestrator
-│   ├── graph.py                  # StateGraph nodes (Understand -> Route -> Call -> Evaluate -> Respond)
-│   ├── state.py                  # TypedDict AgentState schema
-│   └── prompts.py                # System instructions & intent classification prompts
+│   ├── graph.py                  # Gemini + LangGraph loop (agent ⇄ tools), run_agent() entry point
+│   ├── tools_registry.py         # The 11 tools Gemini can request (wrap teammates' functions)
+│   ├── memory.py                 # Short-term chat memory (per browser session)
+│   ├── fallback_agent.py         # Keyword-based Demo mode when Gemini is unavailable
+│   ├── state.py                  # AgentState schema (messages + fallback fields)
+│   ├── prompts.py                # Gemini's rules (never invent numbers, memory rules ...)
+│   ├── period.py                 # "Which month is it?" for the agent
+│   └── tests/                    # Agent tests (fake Gemini, temporary database)
 │
 ├── tools/                        # Deterministic Agent & UI Tools
-│   ├── ocr_tool.py               # Member 4: Receipt image -> Merchant, Date, Items, Tax, Total
+│   ├── auth_tool.py              # Member 2: accounts; passwords stored only as salted PBKDF2 hashes
+│   ├── ocr_tool.py               # Member 4: Receipt image -> Merchant, Date, Items, Tax, Total (Gemini Vision / Tesseract)
 │   ├── database_tool.py          # Member 2: SQLite CRUD & query interfaces
-│   ├── categorization_tool.py    # Member 2: Auto-categorization & NL expense parser
+│   ├── categorization_tool.py    # Member 2: Keywords + ChromaDB semantic categorization & NL expense parser
 │   ├── budget_tool.py            # Member 3: Budget vs actual & discretionary reallocation
 │   └── spike_detector.py         # Member 3: Weekly spending anomaly / spike detection
 │
@@ -69,10 +86,12 @@ SpendWise/
 ├── data/
 │   └── sample_transactions.csv   # Sample transaction dataset for testing CSV ingestion
 │
+├── tests/                        # Member 5: tests for database, categorization, budget, spikes, OCR, pages
 ├── assets/                       # Static logos or sample receipt test images
 ├── .env.example                  # Environment variable template (Never commit real keys)
 ├── .gitignore                    # Git ignore rules for Python, SQLite, and .env
-├── requirements.txt              # Python package dependencies
+├── requirements.txt              # Python package dependencies (needed to run the app)
+├── requirements-dev.txt          # + pytest & freezegun (needed only to run the tests)
 └── README.md                     # Documentation & Team Collaboration Guide
 ```
 
@@ -117,17 +136,61 @@ pip install -r requirements.txt
 ```bash
 cp .env.example .env
 ```
-Edit `.env` and add your `GEMINI_API_KEY` (or leave default to run in deterministic offline demo mode).
+Edit `.env` (never commit it):
+
+| Variable | What it does |
+| :--- | :--- |
+| `GEMINI_API_KEY` | Your free key from aistudio.google.com. Without it the assistant runs in Demo mode. |
+| `GEMINI_MODEL` | Gemini model for the agent and receipt OCR. Free tier ≈ 20 requests/day **per model**; use `gemini-3.5-flash-lite` while testing. If you get a 404 "model not found", pick a newer model. |
+| `SPENDWISE_SEED_DEMO` | `true` (default) fills a new database with demo data dated relative to today. `false` starts empty for real use (delete `data/spendwise.db` to start over). |
+| `CHROMA_PERSIST_DIR` | Where ChromaDB stores learned merchants (default `data/chroma_memory`). First use downloads an ~80 MB model once. |
+| `TESSERACT_CMD_PATH` | Optional: path to `tesseract.exe` if Tesseract OCR is installed. |
+| `SPENDWISE_DB_PATH` | Optional: custom SQLite file location. |
 
 ### Step 4: Run the Streamlit Application
 ```bash
 streamlit run app.py
 ```
 
+### Step 5: Run the Tests
+```bash
+pip install -r requirements-dev.txt
+python -m pytest agent/tests tests -v
+```
+
 ---
 
-## 5. Future Integration Points for Team Members
+## 5. Where Each Technology Is Used
 
-1. **OCR Integration (`tools/ocr_tool.py`)**: Replace the demo receipt dictionary with `pytesseract.image_to_string(Image.open(image_file))` or Gemini Vision structured output.
-2. **ChromaDB Semantic Memory (`tools/categorization_tool.py`)**: Store past `(merchant, description) -> category` embeddings in ChromaDB so recurring college merchants auto-categorize with high accuracy.
-3. **LLM Reasoning in LangGraph (`agent/graph.py`)**: Bind `ChatGoogleGenerativeAI(model="gemini-2.5-flash")` inside `understand_request_node` and `generate_response_node` while keeping `call_tool_node` 100% deterministic Python/Pandas.
+| Technology | Where | What it does |
+| :--- | :--- | :--- |
+| **LLM API (Gemini)** | `agent/graph.py`, `tools/ocr_tool.py` | Plans and picks tools; reads receipt photos (Vision) |
+| **LangChain / LangGraph** | `agent/` | Tool definitions (`@tool`), the agent ⇄ tools loop, state |
+| **SQLite3** | `database/`, `tools/database_tool.py` | Transactions & budgets (budgets carry over to new months) |
+| **Pandas** | `analytics/`, `tools/budget_tool.py`, `tools/spike_detector.py` | Budget vs actual, weekly spikes (last 7 days vs previous 7), trends |
+| **Tesseract OCR / Vision LLM** | `tools/ocr_tool.py` | Gemini Vision → Tesseract (if installed) → labelled demo receipt |
+| **ChromaDB** | `tools/categorization_tool.py` | Semantic merchant memory: "Chai Point" → Food; learns from saved expenses |
+| **Plotly** | `pages/home.py`, `pages/analytics.py` | Interactive charts |
+| **Memory** | `agent/memory.py` + SQLite + ChromaDB | Chat follow-ups ("yes, log it"), stored data, learned merchants |
+
+### Accounts (login)
+The app opens on a **Log in / Create account** screen. Each account only sees its own expenses,
+budgets, profile and learned shops. Passwords are never stored, only salted PBKDF2-SHA256 hashes.
+A new account can start with demo data, or take over data saved on this computer before login
+existed (older databases are upgraded automatically, keeping their data).
+
+### Asking the assistant about money
+- "How much can I still save this month?" / "Am I on track?" (uses your profile)
+- "Set my food budget to 5000" / "My income is now 25000" / "I want to save 4000" (changes them)
+- When you add an expense in chat and it eats into your savings goal, SpendWise warns you.
+
+### Using your own data
+A new account opens on **"Welcome! Let's set up your budget"**: enter your monthly income, savings goal
+and your budget per category (or leave the budgets empty and SpendWise splits your money automatically),
+then click **Save & create my budgets**. Each number lives in ONE place afterwards:
+**👤 My Profile** = income & savings goal only; **🎯 Budget Manager** = budgets per category (it warns if
+they add up to more than income − savings goal).
+
+### Known limits
+- Free Gemini tier: about 5 requests/minute and 20/day per model (one question = 2–3 requests).
+- Merchants with meaningless names (e.g. "XYZ Traders") stay "Others" until saved once with a category.

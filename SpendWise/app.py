@@ -6,18 +6,24 @@ Owner: Member 4 (Streamlit UI + OCR)
 Responsibility:
 - Configures the Streamlit page layout, custom professional financial CSS styling,
   and SQLite database initialization on startup.
-- Implements multi-page navigation across all 6 core modules:
+- Login gate: until someone logs in, only `pages/login.py` is shown. After login the
+  user's id is set with `set_current_user()` on every page load, so all pages and the
+  AI agent only see that user's data.
+- Implements multi-page navigation across all core modules:
   1. Home (`pages/home.py`)
   2. Transactions (`pages/transactions.py`)
   3. Upload Expense (`pages/upload.py`)
   4. Budget (`pages/budget.py`)
   5. Analytics (`pages/analytics.py`)
   6. AI Assistant (`pages/assistant.py`)
+  7. My Profile & Setup (`pages/profile.py`)
 - Does NOT contain business logic, database queries, or Pandas calculations.
 """
 
 import streamlit as st
-from database.database import init_db
+from utils.helpers import period_label
+from database.database import init_db, set_current_user
+from tools.database_tool import get_profile, get_transactions
 
 # Ensure SQLite tables and initial demo records exist before rendering any page
 init_db()
@@ -39,31 +45,57 @@ st.markdown(
             padding-bottom: 2.5rem;
             max-width: 1280px;
         }
+        /* Cards use a soft tint + the theme's own text colour, so they work in dark AND light mode */
         .sw-card {
-            background-color: #FFFFFF;
-            border: 1px solid #E2E8F0;
-            border-radius: 12px;
-            padding: 1.25rem 1.5rem;
-            margin-bottom: 1rem;
+            background: rgba(148, 163, 184, 0.10);
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 14px;
+            padding: 1.1rem 1.25rem;
+            margin-bottom: 0.75rem;
+            color: inherit;
+        }
+        .sw-card hr {
+            border: none;
+            border-top: 1px solid rgba(148, 163, 184, 0.25);
+            margin: 0.6rem 0;
+        }
+        .sw-card-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .sw-card-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+        }
+        .sw-pill {
+            font-size: 0.66rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            padding: 0.18rem 0.6rem;
+            border-radius: 999px;
+            white-space: nowrap;
+            color: #FFFFFF;
         }
         .sw-kpi-label {
             font-size: 0.78rem;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            color: #64748B;
+            opacity: 0.7;
             margin-bottom: 0.35rem;
         }
         .sw-kpi-value {
             font-size: 1.75rem;
             font-weight: 700;
-            color: #0F172A;
             font-variant-numeric: tabular-nums;
             line-height: 1.2;
         }
         .sw-kpi-sub {
             font-size: 0.8rem;
-            color: #475569;
+            opacity: 0.75;
             margin-top: 0.35rem;
         }
         .sw-alert-box {
@@ -87,15 +119,28 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# -----------------------------------------------------------------------------
+# LOGIN GATE: nobody sees any data before logging in
+# -----------------------------------------------------------------------------
+set_current_user(st.session_state.get("user_id"))
+if st.session_state.get("user_id") is None:
+    st.navigation([st.Page("pages/login.py", title="Log in", icon="🔐")]).run()
+    st.stop()
+
+# A brand-new account (no profile, no expenses) starts on the budget setup page,
+# not on a dashboard full of empty cards. Afterwards it always starts on Home.
+needs_setup = get_profile() is None and not get_transactions()
+
 # Define multipage navigation using Streamlit's modern st.navigation API
 pages = {
     "SpendWise Workspace": [
-        st.Page("pages/home.py", title="Home Dashboard", icon="🏠", default=True),
+        st.Page("pages/home.py", title="Home Dashboard", icon="🏠", default=not needs_setup),
         st.Page("pages/transactions.py", title="Transactions", icon="🧾"),
         st.Page("pages/upload.py", title="Upload Expense", icon="📤"),
         st.Page("pages/budget.py", title="Budget Manager", icon="🎯"),
         st.Page("pages/analytics.py", title="Spending Analytics", icon="📊"),
         st.Page("pages/assistant.py", title="Ask SpendWise AI", icon="🤖"),
+        st.Page("pages/profile.py", title="My Profile & Setup", icon="👤", default=needs_setup),
     ]
 }
 
@@ -108,7 +153,11 @@ pg = st.navigation(pages)
 
 with st.sidebar:
     st.divider()
-    st.caption("**Active Period:** October 2026")
+    st.markdown(f"👤 Logged in as **{st.session_state.get('username', '')}**")
+    if st.button("Log out", width="stretch"):
+        st.session_state.clear()  # also forgets this session's chat and agent memory
+        st.rerun()
+    st.caption(f"**Active Period:** {period_label()}")
     st.caption("**Architecture:** LangGraph + SQLite3 + Pandas + OCR")
 
 pg.run()

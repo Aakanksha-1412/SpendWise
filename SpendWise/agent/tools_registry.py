@@ -25,14 +25,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.tools import tool
 
 from analytics.analytics import get_summary_metrics
-from agent.period import this_month
 from tools.budget_tool import (
     calculate_budget_status,
     get_all_budget_statuses,
     suggest_discretionary_reallocation,
 )
 from tools.categorization_tool import categorize_expense
-from tools.database_tool import add_transaction, get_transactions
+from tools.database_tool import add_transaction, get_profile, get_transactions, save_profile, upsert_budget
 from tools.ocr_tool import extract_receipt
 from tools.spike_detector import detect_all_category_spikes, detect_spending_spike
 from utils.helpers import CATEGORIES, normalize_date, to_iso_date
@@ -67,27 +66,27 @@ def _match_category(category: Optional[str]) -> Tuple[Optional[str], Optional[Di
 @tool
 def get_budget_status(category: str) -> Dict[str, Any]:
     """Get this month's budget, amount spent, remaining amount, % used and status
-    (UNDER BUDGET / NEAR LIMIT / OVER BUDGET) for ONE category.
+    (UNDER BUDGET / NEAR LIMIT / OVER BUDGET / NO BUDGET SET) for ONE category.
     Use for questions like "how much food budget is left?" or "how much did I spend on transport?".
     `category` must be one of: Food, Transport, Shopping, Entertainment, Bills, Healthcare, Education, Others."""
     official, error = _match_category(category)
     if error:
         return error
-    return calculate_budget_status(official, **this_month())
+    return calculate_budget_status(official)
 
 
 @tool
 def get_all_budgets_overview() -> List[Dict[str, Any]]:
     """Get budget vs spending status for ALL 8 categories this month.
     Use to find which categories are over budget, or to explain why a budget alert was raised."""
-    return get_all_budget_statuses(**this_month())
+    return get_all_budget_statuses()
 
 
 @tool
 def get_monthly_summary() -> Dict[str, Any]:
     """Get the overall picture for this month: total spent, total monthly budget,
     remaining budget and number of active alerts. Use for general "how am I doing?" questions."""
-    return get_summary_metrics(**this_month())
+    return get_summary_metrics()
 
 
 @tool
@@ -95,7 +94,25 @@ def get_saving_suggestions() -> Dict[str, Any]:
     """Find categories that are OVER budget and discretionary categories that still have
     unused budget, with ready-made suggestions on where to cut back.
     Use for "where can I reduce spending?" or "how do I fix my shopping overspend?"."""
-    return suggest_discretionary_reallocation(**this_month())
+    return suggest_discretionary_reallocation()
+
+
+@tool
+def get_my_profile() -> Dict[str, Any]:
+    """Get the user's monthly income, savings goal, and how much money is left this month
+    after spending (income - spent so far).
+    Use for "how much can I still save?", "am I on track for my savings goal?",
+    "what is my income?"."""
+    summary = get_summary_metrics()
+    if summary["monthly_income"] is None:
+        return {"error": "The user hasn't entered their income yet. Ask them to fill in the 'My Profile' page."}
+    return {
+        "monthly_income": summary["monthly_income"],
+        "savings_goal": summary["savings_goal"],
+        "spent_this_month": summary["total_spent"],
+        "left_after_spending": summary["saved_so_far"],
+        "savings_goal_on_track": summary["savings_on_track"],
+    }
 
 
 @tool
@@ -145,7 +162,18 @@ def check_affordability(category: str, amount: float) -> Dict[str, Any]:
         return {"error": "Amount must be greater than 0."}
     # Simple deterministic maths so the LLM never has to calculate.
     # (Could move into tools/budget_tool.py later — ask Member 3.)
-    status = calculate_budget_status(official, **this_month())
+    status = calculate_budget_status(official)
+    if status["status"] == "NO BUDGET SET":
+        return {
+            "category": status["category"],
+            "planned_amount": amount,
+            "budget": 0.0,
+            "spent_this_month": status["spent"],
+            "no_budget_set": True,
+            "can_afford": None,
+            "note": "No budget is set for this category, so affordability can't be judged. "
+            "Suggest setting one on the Budget page.",
+        }
     left_after = round(status["remaining"] - amount, 2)
     return {
         "category": status["category"],
@@ -205,11 +233,59 @@ def add_expense(
             "source": source,
         }
     )
-    return {
+    result = {
         "saved": True,
         "transaction": saved,
-        "budget_after_saving": calculate_budget_status(official, **this_month()),
+        "budget_after_saving": calculate_budget_status(official),
     }
+    savings = _savings_check()
+    if savings:
+        result["savings_after_saving"] = savings
+    return result
+
+
+def _savings_check() -> Optional[Dict[str, Any]]:
+    """After a new expense: is the user's savings goal still safe this month? (None without a profile)"""
+    summary = get_summary_metrics()
+    if summary["monthly_income"] is None:
+        return None
+    below_by = round(max(summary["savings_goal"] - summary["saved_so_far"], 0.0), 2)
+    return {
+        "monthly_income": summary["monthly_income"],
+        "savings_goal": summary["savings_goal"],
+        "left_after_spending": summary["saved_so_far"],
+        "below_savings_goal_by": below_by,
+        "savings_goal_at_risk": below_by > 0,
+    }
+
+
+@tool
+def set_budget(category: str, amount: float) -> Dict[str, Any]:
+    """CHANGE this month's budget for one category, e.g. "set my food budget to 5000".
+    Only call this when the user clearly asks to set/change a budget."""
+    official, error = _match_category(category)
+    if error:
+        return {**error, "saved": False}
+    if amount < 0:
+        return {"error": "A budget can't be negative.", "saved": False}
+    upsert_budget(official, amount)
+    return {"saved": True, "budget_status": calculate_budget_status(official)}
+
+
+@tool
+def update_my_profile(monthly_income: Optional[float] = None, savings_goal: Optional[float] = None) -> Dict[str, Any]:
+    """CHANGE the user's monthly income and/or monthly savings goal, e.g. "my income is now
+    25000" or "I want to save 4000 a month". Leave out what didn't change. Only call this
+    when the user clearly asks."""
+    profile = get_profile()
+    income = monthly_income if monthly_income is not None else (profile["monthly_income"] if profile else None)
+    goal = savings_goal if savings_goal is not None else (profile["savings_goal"] if profile else 0.0)
+    if income is None or income <= 0:
+        return {"error": "Ask the user for their monthly income (more than 0).", "saved": False}
+    if goal < 0 or goal > income:
+        return {"error": "The savings goal must be between 0 and the monthly income.", "saved": False}
+    save_profile(income, goal, profile["usual_spending"] if profile else {})
+    return {"saved": True, "monthly_income": income, "savings_goal": goal, "savings_now": _savings_check()}
 
 
 @tool
@@ -220,7 +296,13 @@ def read_uploaded_receipt() -> Dict[str, Any]:
     receipt = current_receipt.get()
     if receipt is None:
         return {"error": "No receipt image was uploaded with this message."}
-    return extract_receipt(receipt)
+    result = extract_receipt(receipt)
+    if not result["read_ok"]:
+        return {
+            "error": "The receipt image could not be read. Don't guess: ask the user to type "
+            "the merchant and amount, or to try a clearer photo."
+        }
+    return result
 
 
 # ------------------------------------------------------------------------------
@@ -232,11 +314,14 @@ ALL_TOOLS = [
     get_all_budgets_overview,
     get_monthly_summary,
     get_saving_suggestions,
+    get_my_profile,
     check_spending_spike,
     check_all_spending_spikes,
     search_transactions,
     check_affordability,
     suggest_category,
     add_expense,
+    set_budget,
+    update_my_profile,
     read_uploaded_receipt,
 ]

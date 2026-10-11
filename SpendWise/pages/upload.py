@@ -11,13 +11,25 @@ Responsibility:
   Image -> OCR -> Extract (Merchant, Date, Items, Tax, Total) -> Categorization -> SQLite.
 """
 
+from datetime import datetime
+
 import streamlit as st
 import pandas as pd
 
+from database.database import current_user_id
 from tools.ocr_tool import extract_receipt
-from tools.categorization_tool import categorize_expense
-from tools.database_tool import add_transaction, bulk_insert_transactions
-from utils.helpers import CATEGORIES, format_inr
+from tools.categorization_tool import merchant_memory_version
+from tools.csv_import_tool import import_rows, read_transactions_csv
+from tools.database_tool import add_transaction
+from utils.helpers import CATEGORIES, format_inr, is_in_current_month
+
+
+@st.cache_data(show_spinner="Reading and categorizing transactions...")
+def _read_csv(data: bytes, memory_version: int, user_id: int) -> dict:
+    """Cleaned CSV rows. Cached, so Streamlit reruns (e.g. clicking Import) don't repeat the
+    ChromaDB lookups. `memory_version` and `user_id` are part of the cache key, so newly learned
+    merchants are picked up and one user's cached result is never shown to another."""
+    return read_transactions_csv(data)
 
 
 def render_upload_page() -> None:
@@ -36,32 +48,26 @@ def render_upload_page() -> None:
         uploaded_csv = st.file_uploader("Select a CSV file", type=["csv"], key="csv_uploader")
 
         if uploaded_csv is not None:
-            try:
-                csv_df = pd.read_csv(uploaded_csv)
-                csv_df.columns = [c.strip().lower() for c in csv_df.columns]
-
-                required = {"date", "merchant", "amount"}
-                if not required.issubset(set(csv_df.columns)):
-                    st.error(f"CSV must contain at least columns: {required}")
+            result = _read_csv(uploaded_csv.getvalue(), merchant_memory_version(), current_user_id())
+            if result["error"]:
+                st.error(result["error"])
+            else:
+                if result["skipped"]:
+                    with st.expander(f"⚠️ {len(result['skipped'])} row(s) will be skipped — see why"):
+                        for reason in result["skipped"]:
+                            st.markdown(f"- {reason}")
+                if result["rows"]:
+                    preview = pd.DataFrame(result["rows"])
+                    st.markdown(f"**Preview ({len(preview)} expenses ready to import):**")
+                    st.dataframe(preview.head(10), width="stretch", hide_index=True)
+                    if st.button("Import CSV Transactions to SQLite", type="primary", width="stretch"):
+                        outcome = import_rows(result["rows"])
+                        message = f"Imported {outcome['imported']} new expenses."
+                        if outcome["duplicates"]:
+                            message += f" Skipped {outcome['duplicates']} already saved before (no duplicates)."
+                        st.success(message)
                 else:
-                    if "description" not in csv_df.columns:
-                        csv_df["description"] = "CSV Import"
-                    if "category" not in csv_df.columns:
-                        csv_df["category"] = csv_df.apply(
-                            lambda r: categorize_expense(str(r["merchant"]), str(r["description"])),
-                            axis=1,
-                        )
-                    csv_df["source"] = "CSV"
-
-                    st.markdown(f"**Preview ({len(csv_df)} rows detected):**")
-                    st.dataframe(csv_df.head(10), use_container_width=True, hide_index=True)
-
-                    if st.button("Import CSV Transactions to SQLite", type="primary", use_container_width=True):
-                        records = csv_df.to_dict(orient="records")
-                        count = bulk_insert_transactions(records)
-                        st.success(f"Successfully imported {count} transactions into SQLite!")
-            except Exception as exc:
-                st.error(f"Failed to parse CSV file: {exc}")
+                    st.warning("No expenses could be read from this file.")
 
     # =========================================================================
     # SECTION B: UPLOAD RECEIPT (OCR PIPELINE)
@@ -76,12 +82,19 @@ def render_upload_page() -> None:
             key="receipt_uploader",
         )
 
-        if st.button("Run Demo Receipt Extraction (No File Needed)", use_container_width=True):
+        # A different photo (or removing it) clears the previous result, so old fields
+        # (e.g. the demo receipt) are never shown under a new, not-yet-read photo.
+        current_upload = uploaded_image.file_id if uploaded_image is not None else None
+        if st.session_state.get("ocr_upload_id") != current_upload:
+            st.session_state["ocr_upload_id"] = current_upload
+            st.session_state.pop("ocr_result", None)
+
+        if st.button("Run Demo Receipt Extraction (No File Needed)", width="stretch"):
             st.session_state["ocr_result"] = extract_receipt(None, filename_hint="starbucks_receipt.jpg")
 
         if uploaded_image is not None:
             st.image(uploaded_image, caption="Uploaded Receipt Image", width=260)
-            if st.button("Extract Receipt via OCR Tool", type="primary", use_container_width=True):
+            if st.button("Extract Receipt via OCR Tool", type="primary", width="stretch"):
                 st.session_state["ocr_result"] = extract_receipt(
                     uploaded_image, filename_hint=uploaded_image.name
                 )
@@ -90,12 +103,26 @@ def render_upload_page() -> None:
             ocr_data = st.session_state["ocr_result"]
             st.markdown("#### Extracted Receipt Fields")
             st.caption(f"Engine: `{ocr_data.get('engine')}`")
+            if not ocr_data.get("read_ok", True):
+                st.warning("⚠️ This receipt couldn't be read automatically. Please type the merchant, date and total below.")
+
+            # An old bill (e.g. dated March, paid now) must not silently land in another month
+            today_str = datetime.now().strftime("%d-%m-%Y")
+            old_receipt_date = ocr_data.get("read_ok", True) and not is_in_current_month(ocr_data["date"])
 
             with st.form("confirm_ocr_form"):
                 e_col1, e_col2 = st.columns(2)
                 with e_col1:
                     merchant = st.text_input("Merchant", value=ocr_data["merchant"])
-                    date_val = st.text_input("Date (DD-MM-YYYY)", value=ocr_data["date"])
+                    if old_receipt_date:
+                        date_choice = st.radio(
+                            "📅 Which date should this expense have?",
+                            [f"Today ({today_str})", f"Date on the bill ({ocr_data['date']})"],
+                            help="The date printed on the receipt isn't in this month. Choose 'Today' if you're paying it now.",
+                        )
+                        date_val = today_str if date_choice.startswith("Today") else ocr_data["date"]
+                    else:
+                        date_val = st.text_input("Date (DD-MM-YYYY)", value=ocr_data["date"])
                     category = st.selectbox(
                         "Auto-Assigned Category",
                         CATEGORIES,

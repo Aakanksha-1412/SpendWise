@@ -15,7 +15,6 @@ Responsibility:
 import re
 from typing import Dict, Any, List
 
-from agent.period import this_month, this_month_label
 from agent.state import AgentState
 from tools.ocr_tool import extract_receipt
 from tools.categorization_tool import parse_natural_language_expense, categorize_expense
@@ -27,7 +26,7 @@ from tools.budget_tool import (
 )
 from tools.spike_detector import detect_all_category_spikes
 from analytics.analytics import get_summary_metrics
-from utils.helpers import CATEGORIES, format_inr
+from utils.helpers import CATEGORIES, format_inr, period_label
 
 
 # ==============================================================================
@@ -49,7 +48,7 @@ def understand_request_node(state: AgentState) -> AgentState:
             detected_cat = cat
             break
     if not detected_cat:
-        inferred = categorize_expense("", query)
+        inferred = categorize_expense("", query, use_semantic=False)  # a question, not a shop name
         if inferred != "Others":
             detected_cat = inferred
 
@@ -195,6 +194,9 @@ def call_tool_node(state: AgentState) -> AgentState:
     for tool_name in selected_tools:
         if tool_name == "ocr_tool.extract_receipt":
             receipt_data = extract_receipt(state.get("uploaded_receipt"), filename_hint=query)
+            if not receipt_data.get("read_ok", True):
+                outputs["receipt_unreadable"] = True  # save nothing; the reply explains
+                continue
             # If user mentioned a specific amount in the prompt, override demo amount
             amt_match = re.search(r"(?:₹|rs\.?|inr\s*)\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)", query, re.IGNORECASE)
             if amt_match:
@@ -224,13 +226,13 @@ def call_tool_node(state: AgentState) -> AgentState:
                     target_cat = saved_tx["category"]
 
         elif tool_name == "budget_tool.calculate_budget_status":
-            outputs["category_budget_status"] = calculate_budget_status(target_cat, **this_month())
+            outputs["category_budget_status"] = calculate_budget_status(target_cat)
 
         elif tool_name == "budget_tool.get_all_budget_statuses":
-            outputs["all_budget_statuses"] = get_all_budget_statuses(**this_month())
+            outputs["all_budget_statuses"] = get_all_budget_statuses()
 
         elif tool_name == "budget_tool.suggest_discretionary_reallocation":
-            outputs["reallocation_plan"] = suggest_discretionary_reallocation(**this_month())
+            outputs["reallocation_plan"] = suggest_discretionary_reallocation()
 
         elif tool_name == "spike_detector.detect_all_category_spikes":
             outputs["all_spikes"] = detect_all_category_spikes()
@@ -240,7 +242,7 @@ def call_tool_node(state: AgentState) -> AgentState:
             outputs["category_spike"] = detect_spending_spike(target_cat)
 
         elif tool_name == "analytics.get_summary_metrics":
-            outputs["summary_metrics"] = get_summary_metrics(**this_month())
+            outputs["summary_metrics"] = get_summary_metrics()
 
         elif tool_name == "database_tool.get_transactions":
             # Biggest purchases in the first over-budget category (real SQLite rows)
@@ -349,6 +351,11 @@ def generate_response_node(state: AgentState) -> AgentState:
                 f"- **Total Spent:** {format_inr(b_stat.get('spent', 0))} ({b_stat.get('utilization_pct', 0)}%)\n"
                 f"- **Remaining Budget:** **{format_inr(b_stat.get('remaining', 0))}** (`{b_stat.get('status', 'OK')}`)"
             )
+        elif outputs.get("receipt_unreadable"):
+            response = (
+                "I couldn't read that receipt photo. Please type the merchant and amount "
+                "(for example: *'Add ₹471 at Behrouz Biryani for food'*) or try a clearer photo."
+            )
         else:
             response = (
                 "Please include the merchant and amount (for example: *'Add ₹550 at Starbucks for food and tell me how much of my food budget is left'*) "
@@ -360,7 +367,7 @@ def generate_response_node(state: AgentState) -> AgentState:
         spike = outputs.get("category_spike", {})
         cat_name = b_stat.get("category", "Food")
         response = (
-            f"### {cat_name} Spending & Budget Summary ({this_month_label()})\n\n"
+            f"### {cat_name} Spending & Budget Summary ({period_label()})\n\n"
             f"- **Monthly Budget:** {format_inr(b_stat.get('budget', 0))}\n"
             f"- **Actual Spent:** **{format_inr(b_stat.get('spent', 0))}** ({b_stat.get('utilization_pct', 0)}% used)\n"
             f"- **Remaining Budget:** **{format_inr(b_stat.get('remaining', 0))}**\n"
@@ -458,8 +465,8 @@ def generate_response_node(state: AgentState) -> AgentState:
         response = "\n".join(lines)
 
     else:
-        summary = outputs.get("summary_metrics", get_summary_metrics(**this_month()))
-        reallocation = outputs.get("reallocation_plan", suggest_discretionary_reallocation(**this_month()))
+        summary = outputs.get("summary_metrics", get_summary_metrics())
+        reallocation = outputs.get("reallocation_plan", suggest_discretionary_reallocation())
         alert_parts = [
             f"{c['category']} over budget by {format_inr(abs(c['remaining']))}"
             for c in reallocation.get("over_budget_categories", [])
@@ -469,7 +476,7 @@ def generate_response_node(state: AgentState) -> AgentState:
             if s["spike_detected"]
         ]
         response = (
-            f"### SpendWise Financial Overview ({this_month_label()})\n\n"
+            f"### SpendWise Financial Overview ({period_label()})\n\n"
             f"- **Total Monthly Budget:** {format_inr(summary['monthly_budget'])}\n"
             f"- **Total Spent So Far:** **{format_inr(summary['total_spent'])}**\n"
             f"- **Remaining Overall Budget:** **{format_inr(summary['remaining_budget'])}**\n"

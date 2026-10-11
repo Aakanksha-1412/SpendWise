@@ -22,7 +22,7 @@ from analytics.analytics import (
     get_budget_vs_actual_df,
     get_dashboard_ai_insights,
 )
-from utils.helpers import format_inr
+from utils.helpers import format_inr, period_label
 
 
 def render_home_page() -> None:
@@ -31,7 +31,7 @@ def render_home_page() -> None:
     # -------------------------------------------------------------------------
     st.title("SPENDWISE")
     st.subheader("Autonomous Personal Financial Expense & Budgeting Assistant")
-    st.caption("October 2026 Financial Cycle · Real-Time SQLite & Pandas Telemetry · LangGraph Agent Ready")
+    st.caption(f"{period_label()} Financial Cycle · Real-Time SQLite & Pandas Telemetry · LangGraph Agent Ready")
 
     # -------------------------------------------------------------------------
     # 2. CLICKABLE QUICK-ACTION NAVIGATION CARDS
@@ -39,22 +39,22 @@ def render_home_page() -> None:
     st.markdown("#### Quick Navigation")
     nav_cols = st.columns(6)
     with nav_cols[0]:
-        if st.button("➕ Add Expense", use_container_width=True):
+        if st.button("➕ Add Expense", width="stretch"):
             st.switch_page("pages/transactions.py")
     with nav_cols[1]:
-        if st.button("🧾 Upload Receipt", use_container_width=True):
+        if st.button("🧾 Upload Receipt", width="stretch"):
             st.switch_page("pages/upload.py")
     with nav_cols[2]:
-        if st.button("📋 View Transactions", use_container_width=True):
+        if st.button("📋 View Transactions", width="stretch"):
             st.switch_page("pages/transactions.py")
     with nav_cols[3]:
-        if st.button("🎯 Manage Budget", use_container_width=True):
+        if st.button("🎯 Manage Budget", width="stretch"):
             st.switch_page("pages/budget.py")
     with nav_cols[4]:
-        if st.button("📊 View Analytics", use_container_width=True):
+        if st.button("📊 View Analytics", width="stretch"):
             st.switch_page("pages/analytics.py")
     with nav_cols[5]:
-        if st.button("🤖 Ask SpendWise", use_container_width=True, type="primary"):
+        if st.button("🤖 Ask SpendWise", width="stretch", type="primary"):
             st.switch_page("pages/assistant.py")
 
     st.divider()
@@ -62,14 +62,30 @@ def render_home_page() -> None:
     # -------------------------------------------------------------------------
     # 3. SUMMARY KPI CARDS
     # -------------------------------------------------------------------------
-    summary = get_summary_metrics(month=10, year=2026)
+    summary = get_summary_metrics()
+
+    if summary["monthly_income"] is None:
+        banner_col, button_col = st.columns([4, 1])
+        with banner_col:
+            st.info("👋 These are **demo numbers**. Add your own income and usual spending to get your real budgets.")
+        with button_col:
+            if st.button("👤 Set up my profile", width="stretch", type="primary"):
+                st.switch_page("pages/profile.py")
+    else:
+        on_track = summary["savings_on_track"]
+        st.markdown(
+            f"**💰 Income:** {format_inr(summary['monthly_income'])} · "
+            f"**Left after spending:** {format_inr(summary['saved_so_far'])} · "
+            f"**Savings goal:** {format_inr(summary['savings_goal'])} "
+            + ("✅ on track" if on_track else "⚠️ not on track — spending is eating into your savings goal")
+        )
     kpi_cols = st.columns(4)
 
     with kpi_cols[0]:
         st.markdown(
             f"""
             <div class="sw-card">
-                <div class="sw-kpi-label">Total Spent (Oct 2026)</div>
+                <div class="sw-kpi-label">Total Spent ({period_label()})</div>
                 <div class="sw-kpi-value">{format_inr(summary['total_spent'])}</div>
                 <div class="sw-kpi-sub">Across 8 active categories</div>
             </div>
@@ -121,7 +137,7 @@ def render_home_page() -> None:
     # -------------------------------------------------------------------------
     left_col, right_col = st.columns([1.55, 1.0], gap="large")
 
-    bva_df = get_budget_vs_actual_df(month=10, year=2026)
+    bva_df = get_budget_vs_actual_df()
 
     with left_col:
         st.markdown("#### Budget vs Actual Spending by Category")
@@ -154,11 +170,11 @@ def render_home_page() -> None:
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             yaxis=dict(title="Amount (₹)", gridcolor="#F1F5F9"),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     with right_col:
         st.markdown("#### 🧠 AI Financial Insights & Alerts")
-        insights = get_dashboard_ai_insights(month=10, year=2026)
+        insights = get_dashboard_ai_insights()
 
         for ob in insights["over_budget_alerts"]:
             overrun_amt = format_inr(abs(ob["remaining"]))
@@ -199,7 +215,7 @@ def render_home_page() -> None:
     # -------------------------------------------------------------------------
     # 5. CATEGORY OVERVIEW GRID (ALL 8 OFFICIAL CATEGORIES)
     # -------------------------------------------------------------------------
-    st.markdown("#### Category Overview (October 2026)")
+    st.markdown(f"#### Category Overview ({period_label()})")
     cat_cols = st.columns(4)
     for idx, row in bva_df.iterrows():
         col = cat_cols[idx % 4]
@@ -207,20 +223,20 @@ def render_home_page() -> None:
         status_color = (
             "#DC2626"
             if status_label == "OVER BUDGET"
-            else ("#D97706" if status_label == "NEAR LIMIT" else "#16A34A")
+            else ("#D97706" if status_label == "NEAR LIMIT" else ("#64748B" if status_label == "NO BUDGET SET" else "#16A34A"))
         )
         with col:
             st.markdown(
                 f"""
-                <div class="sw-card">
-                    <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <strong style="font-size:1rem;color:#0F172A;">{row['Category']}</strong>
-                        <span style="font-size:0.72rem;font-weight:600;color:{status_color};">{status_label}</span>
+                <div class="sw-card" style="border-left:5px solid {status_color};">
+                    <div class="sw-card-head">
+                        <span class="sw-card-title">{row['Category']}</span>
+                        <span class="sw-pill" style="background:{status_color};">{status_label}</span>
                     </div>
-                    <div style="margin-top:0.6rem;font-size:0.85rem;color:#475569;">
+                    <div style="margin-top:0.6rem;font-size:0.88rem;">
                         Spent: <b>{format_inr(row['Spent'])}</b> / {format_inr(row['Budget'])}
                     </div>
-                    <div style="margin-top:0.2rem;font-size:0.82rem;color:{status_color};font-weight:600;">
+                    <div style="margin-top:0.2rem;font-size:0.85rem;color:{status_color};font-weight:700;">
                         Remaining: {format_inr(row['Remaining'])}
                     </div>
                 </div>

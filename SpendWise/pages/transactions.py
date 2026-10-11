@@ -42,7 +42,7 @@ def render_transactions_page() -> None:
                     label_visibility="collapsed",
                 )
             with nl_col2:
-                if st.button("Parse & Add", type="primary", use_container_width=True):
+                if st.button("Parse & Add", type="primary", width="stretch"):
                     if nl_input.strip():
                         parsed = parse_natural_language_expense(nl_input)
                         if parsed["amount"] > 0:
@@ -59,7 +59,7 @@ def render_transactions_page() -> None:
             with st.form("manual_expense_form", clear_on_submit=True):
                 f_cols = st.columns(4)
                 with f_cols[0]:
-                    tx_date = st.date_input("Date", value=datetime(2026, 10, 8))
+                    tx_date = st.date_input("Date", value=datetime.now())
                 with f_cols[1]:
                     merchant = st.text_input("Merchant", placeholder="e.g., Swiggy, Uber, Amazon")
                 with f_cols[2]:
@@ -134,7 +134,7 @@ def render_transactions_page() -> None:
     )
 
     st.markdown(f"**Showing {len(display_df)} transaction(s)** · Total Filtered Spend: **{format_inr(df['amount'].sum())}**")
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    st.dataframe(display_df, width="stretch", hide_index=True)
 
 
 render_transactions_page()

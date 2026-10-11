@@ -4,14 +4,14 @@ SpendWise — Spending Spike Detection Tool
 Owner: Member 3 (Analytics + Budget + Alerts)
 
 Responsibility:
-- Compares current weekly spending (Oct 1–Oct 8, 2026) against previous weekly
-  spending (Sep 18–Sep 24, 2026) using Pandas.
+- Compares current weekly spending (the last 7 days, including today) against the
+  previous week (the 7 days before that) using Pandas. Windows move with today's date.
 - Flags categories where spending has spiked significantly (>= 35% increase and
   delta >= ₹300).
 """
 
-from datetime import datetime
-from typing import Dict, Any, List
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Tuple
 
 try:
     import pandas as pd
@@ -22,6 +22,20 @@ except ImportError:
 
 from tools.database_tool import get_transactions_df, get_transactions
 from utils.helpers import CATEGORIES, format_inr
+
+
+def week_windows() -> Tuple[Tuple[str, str], Tuple[str, str]]:
+    """
+    ((previous_start, previous_end), (current_start, current_end)) as ISO dates:
+    current week = last 7 days including today, previous week = the 7 days before.
+    """
+    today = date.today()
+    current = (today - timedelta(days=6), today)
+    previous = (today - timedelta(days=13), today - timedelta(days=7))
+    return (
+        (previous[0].isoformat(), previous[1].isoformat()),
+        (current[0].isoformat(), current[1].isoformat()),
+    )
 
 
 def detect_spending_spike(category: str, threshold_pct: float = 35.0) -> Dict[str, Any]:
@@ -42,6 +56,7 @@ def detect_spending_spike(category: str, threshold_pct: float = 35.0) -> Dict[st
             "message": str
         }
     """
+    previous_week, current_week = week_windows()
     if PANDAS_AVAILABLE:
         df = get_transactions_df()
         if df.empty:
@@ -58,8 +73,8 @@ def detect_spending_spike(category: str, threshold_pct: float = 35.0) -> Dict[st
         df["parsed_date"] = pd.to_datetime(df["date"], format="%d-%m-%Y", errors="coerce")
         cat_df = df[df["category"].str.lower() == category.strip().lower()]
 
-        prev_mask = (cat_df["parsed_date"] >= "2026-09-18") & (cat_df["parsed_date"] <= "2026-09-30")
-        curr_mask = (cat_df["parsed_date"] >= "2026-10-01") & (cat_df["parsed_date"] <= "2026-10-08")
+        prev_mask = (cat_df["parsed_date"] >= previous_week[0]) & (cat_df["parsed_date"] <= previous_week[1])
+        curr_mask = (cat_df["parsed_date"] >= current_week[0]) & (cat_df["parsed_date"] <= current_week[1])
 
         prev_spend = float(cat_df.loc[prev_mask, "amount"].sum())
         curr_spend = float(cat_df.loc[curr_mask, "amount"].sum())
@@ -72,9 +87,9 @@ def detect_spending_spike(category: str, threshold_pct: float = 35.0) -> Dict[st
                 try:
                     dt = datetime.strptime(r["date"], "%d-%m-%Y")
                     iso = dt.strftime("%Y-%m-%d")
-                    if "2026-09-18" <= iso <= "2026-09-30":
+                    if previous_week[0] <= iso <= previous_week[1]:
                         prev_spend += float(r["amount"])
-                    elif "2026-10-01" <= iso <= "2026-10-08":
+                    elif current_week[0] <= iso <= current_week[1]:
                         curr_spend += float(r["amount"])
                 except ValueError:
                     continue
