@@ -57,3 +57,32 @@ def test_log_out_goes_back_to_the_login_screen():
 
     assert "user_id" not in app.session_state
     assert [t.label for t in app.tabs] == ["🔐 Log in", "✨ Create account"]
+
+
+def _sign_up(app, username, demo=False):
+    app.text_input(key="signup_username").input(username)
+    app.text_input(key="signup_password").input("secret123")
+    app.text_input(key="signup_confirm").input("secret123")
+    if demo:
+        app.checkbox(key="signup_demo").check()
+    _button(app, "Create account").click().run()
+
+
+def test_brand_new_account_opens_on_budget_setup_with_empty_fields():
+    app = AppTest.from_file(APP, default_timeout=60).run()
+    _sign_up(app, "newbie")
+
+    assert not app.exception
+    assert any("set up your budget" in t.value for t in app.title)
+    assert app.number_input(key="profile_income").value is None  # empty, not 0.00
+    assert app.number_input(key="profile_usual_Food").value is None
+    assert not [c for c in app.checkbox if c.key == "profile_start_fresh"]  # nothing to remove yet
+    assert not any("Total Spent" in m.value for m in app.markdown)  # no empty dashboard
+
+
+def test_account_with_demo_data_opens_on_the_dashboard():
+    app = AppTest.from_file(APP, default_timeout=60).run()
+    _sign_up(app, "demofan", demo=True)
+
+    assert not app.exception
+    assert any(t.value == "SPENDWISE" for t in app.title)

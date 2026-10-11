@@ -96,12 +96,14 @@ def render_profile_form(profile) -> None:
         with c1:
             income = st.number_input(
                 "Monthly income / pocket money (₹)", min_value=0.0, step=500.0,
-                value=float(profile["monthly_income"]) if profile else 0.0, key="profile_income",
+                value=float(profile["monthly_income"]) if profile else None, placeholder="e.g. 15000",
+                key="profile_income",
             )
         with c2:
             savings_goal = st.number_input(
                 "Savings goal per month (₹)", min_value=0.0, step=500.0,
-                value=float(profile["savings_goal"]) if profile else 0.0, key="profile_savings",
+                value=float(profile["savings_goal"]) if profile else None, placeholder="e.g. 2000",
+                key="profile_savings",
             )
 
         st.markdown("##### 2. How much do you usually spend in a month? (rough guess is fine)")
@@ -111,20 +113,26 @@ def render_profile_form(profile) -> None:
             with cols[idx % 4]:
                 usual[cat] = st.number_input(
                     f"{cat} (₹)", min_value=0.0, step=100.0,
-                    value=float(usual_now.get(cat, 0.0)), key=f"profile_usual_{cat}",
+                    value=float(usual_now[cat]) if profile else None, placeholder="0",
+                    key=f"profile_usual_{cat}",
                 )
 
         update_budgets = st.checkbox(
             f"Set my {period_label()} budgets from this (you can still change them on the Budget page)",
             value=True, key="profile_update_budgets",
         )
-        start_fresh = st.checkbox(
-            "Start fresh: remove ALL my current expenses and budgets (e.g. demo data)",
-            value=profile is None and bool(get_transactions()), key="profile_start_fresh",
-        )
+        start_fresh = False
+        if get_transactions():
+            start_fresh = st.checkbox(
+                "Start fresh: remove ALL my current expenses and budgets (e.g. demo data)",
+                value=profile is None, key="profile_start_fresh",
+            )
         submitted = st.form_submit_button("Save", type="primary")
 
     if submitted:
+        income = income or 0.0
+        savings_goal = savings_goal or 0.0
+        usual = {cat: amount or 0.0 for cat, amount in usual.items()}
         if income <= 0:
             st.error("Please enter your monthly income (more than ₹0).")
         elif savings_goal > income:
@@ -145,14 +153,13 @@ def render_profile_form(profile) -> None:
 
 
 def render_profile_page() -> None:
-    st.title("👤 My Profile & Money Plan")
-
     saved_message = st.session_state.pop("profile_saved_message", None)
     if saved_message:
         st.success(saved_message)
 
     profile = get_profile()
     if profile is None:
+        st.title("👋 Welcome! Let's set up your budget")
         st.caption(
             "Tell SpendWise about your money once — it's saved to your account. Your income, savings goal "
             f"and usual spending are used to create your budgets for {period_label()}."
@@ -162,6 +169,7 @@ def render_profile_page() -> None:
         render_profile_form(None)
         return
 
+    st.title("👤 My Profile & Money Plan")
     render_money_plan(get_money_plan())
     st.divider()
     with st.expander("✏️ Edit my details (income, savings goal, usual spending)"):

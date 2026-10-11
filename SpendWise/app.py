@@ -23,6 +23,7 @@ Responsibility:
 import streamlit as st
 from utils.helpers import period_label
 from database.database import init_db, set_current_user
+from tools.database_tool import get_profile, get_transactions
 
 # Ensure SQLite tables and initial demo records exist before rendering any page
 init_db()
@@ -126,16 +127,20 @@ if st.session_state.get("user_id") is None:
     st.navigation([st.Page("pages/login.py", title="Log in", icon="🔐")]).run()
     st.stop()
 
+# A brand-new account (no profile, no expenses) starts on the budget setup page,
+# not on a dashboard full of empty cards. Afterwards it always starts on Home.
+needs_setup = get_profile() is None and not get_transactions()
+
 # Define multipage navigation using Streamlit's modern st.navigation API
 pages = {
     "SpendWise Workspace": [
-        st.Page("pages/home.py", title="Home Dashboard", icon="🏠", default=True),
+        st.Page("pages/home.py", title="Home Dashboard", icon="🏠", default=not needs_setup),
         st.Page("pages/transactions.py", title="Transactions", icon="🧾"),
         st.Page("pages/upload.py", title="Upload Expense", icon="📤"),
         st.Page("pages/budget.py", title="Budget Manager", icon="🎯"),
         st.Page("pages/analytics.py", title="Spending Analytics", icon="📊"),
         st.Page("pages/assistant.py", title="Ask SpendWise AI", icon="🤖"),
-        st.Page("pages/profile.py", title="My Profile & Setup", icon="👤"),
+        st.Page("pages/profile.py", title="My Profile & Setup", icon="👤", default=needs_setup),
     ]
 }
 
