@@ -123,3 +123,22 @@ def test_shops_learned_by_one_user_are_not_used_for_another():
 
     set_current_user(ravi)
     assert categorize_expense("Plinkerton Hub") == "Others"
+
+
+def test_demo_data_is_not_recreated_once_accounts_exist():
+    from tools.auth_tool import has_unowned_data
+
+    database.init_db()
+    create_user("owner", "secret123", claim_existing_data=True)
+
+    database.init_db()  # runs on every page load
+
+    assert has_unowned_data() is False  # the next person signing up gets no surprise data
+
+
+def test_sign_up_can_describe_the_data_that_would_be_moved():
+    from tools.auth_tool import unowned_data_summary
+
+    database.init_db()  # demo data, no owner yet
+
+    assert unowned_data_summary().startswith("20 expenses")

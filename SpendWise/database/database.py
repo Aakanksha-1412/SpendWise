@@ -111,11 +111,12 @@ def init_db(db_path: Optional[str] = None, allow_demo: bool = True) -> None:
         """
     )
     conn.commit()
-    # Demo data only for "no login" data on a brand-new database, never once a profile exists
-    # (init_db runs on every query, so the cheap checks come first)
+    # Demo data only for "no login" data on a brand-new database: never once a profile or any
+    # account exists (init_db runs on every query, so the cheap checks come first)
     if (
         allow_demo
         and _user_data_empty(conn, NO_LOGIN_USER)
+        and not _accounts_exist(conn)
         and not _profile_exists(conn, NO_LOGIN_USER)
         and seed_demo_enabled()
     ):
@@ -187,6 +188,10 @@ def _user_data_empty(conn: sqlite3.Connection, user_id: int) -> bool:
         (user_id, user_id),
     ).fetchone()
     return bool(row[0])
+
+
+def _accounts_exist(conn: sqlite3.Connection) -> bool:
+    return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] > 0
 
 
 def _profile_exists(conn: sqlite3.Connection, user_id: int) -> bool:

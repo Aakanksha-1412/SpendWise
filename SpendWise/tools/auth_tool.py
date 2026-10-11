@@ -84,6 +84,18 @@ def verify_user(username: str, password: str) -> Optional[int]:
     return int(row["id"])
 
 
+def unowned_data_summary() -> str:
+    """Plain-language list of the data saved without login, e.g. "20 expenses, 8 budgets, a profile"."""
+    init_db(allow_demo=False)
+    conn = get_connection()
+    expenses = conn.execute("SELECT COUNT(*) FROM transactions WHERE user_id = ?", (NO_LOGIN_USER,)).fetchone()[0]
+    budgets = conn.execute("SELECT COUNT(*) FROM budgets WHERE user_id = ?", (NO_LOGIN_USER,)).fetchone()[0]
+    profile = conn.execute("SELECT COUNT(*) FROM profile WHERE user_id = ?", (NO_LOGIN_USER,)).fetchone()[0]
+    conn.close()
+    parts = [f"{expenses} expenses", f"{budgets} budgets"] + (["a profile (income & savings goal)"] if profile else [])
+    return ", ".join(parts)
+
+
 def has_unowned_data() -> bool:
     """True if this computer has data saved before login existed (shown as an option at sign-up)."""
     init_db(allow_demo=False)

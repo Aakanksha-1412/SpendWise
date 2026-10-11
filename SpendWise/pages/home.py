@@ -228,15 +228,15 @@ def render_home_page() -> None:
         with col:
             st.markdown(
                 f"""
-                <div class="sw-card">
-                    <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <strong style="font-size:1rem;color:#0F172A;">{row['Category']}</strong>
-                        <span style="font-size:0.72rem;font-weight:600;color:{status_color};">{status_label}</span>
+                <div class="sw-card" style="border-left:5px solid {status_color};">
+                    <div class="sw-card-head">
+                        <span class="sw-card-title">{row['Category']}</span>
+                        <span class="sw-pill" style="background:{status_color};">{status_label}</span>
                     </div>
-                    <div style="margin-top:0.6rem;font-size:0.85rem;color:#475569;">
+                    <div style="margin-top:0.6rem;font-size:0.88rem;">
                         Spent: <b>{format_inr(row['Spent'])}</b> / {format_inr(row['Budget'])}
                     </div>
-                    <div style="margin-top:0.2rem;font-size:0.82rem;color:{status_color};font-weight:600;">
+                    <div style="margin-top:0.2rem;font-size:0.85rem;color:{status_color};font-weight:700;">
                         Remaining: {format_inr(row['Remaining'])}
                     </div>
                 </div>

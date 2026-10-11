@@ -12,7 +12,7 @@ Responsibility:
 
 import streamlit as st
 
-from tools.auth_tool import create_user, has_unowned_data, verify_user
+from tools.auth_tool import create_user, has_unowned_data, unowned_data_summary, verify_user
 
 
 def _log_in(user_id: int, username: str) -> None:
@@ -49,7 +49,10 @@ def render_login_page() -> None:
             claim = False
             if has_unowned_data():
                 claim = st.checkbox(
-                    "Move the data already saved on this computer into my account", value=True, key="signup_claim"
+                    f"Move the data saved on this computer before login ({unowned_data_summary()}) into my account. "
+                    "Leave unticked to start with an empty account.",
+                    value=False,
+                    key="signup_claim",
                 )
             if st.form_submit_button("Create account", type="primary"):
                 if new_password != confirm:

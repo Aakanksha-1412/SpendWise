@@ -44,31 +44,57 @@ st.markdown(
             padding-bottom: 2.5rem;
             max-width: 1280px;
         }
+        /* Cards use a soft tint + the theme's own text colour, so they work in dark AND light mode */
         .sw-card {
-            background-color: #FFFFFF;
-            border: 1px solid #E2E8F0;
-            border-radius: 12px;
-            padding: 1.25rem 1.5rem;
-            margin-bottom: 1rem;
+            background: rgba(148, 163, 184, 0.10);
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 14px;
+            padding: 1.1rem 1.25rem;
+            margin-bottom: 0.75rem;
+            color: inherit;
+        }
+        .sw-card hr {
+            border: none;
+            border-top: 1px solid rgba(148, 163, 184, 0.25);
+            margin: 0.6rem 0;
+        }
+        .sw-card-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .sw-card-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+        }
+        .sw-pill {
+            font-size: 0.66rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            padding: 0.18rem 0.6rem;
+            border-radius: 999px;
+            white-space: nowrap;
+            color: #FFFFFF;
         }
         .sw-kpi-label {
             font-size: 0.78rem;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            color: #64748B;
+            opacity: 0.7;
             margin-bottom: 0.35rem;
         }
         .sw-kpi-value {
             font-size: 1.75rem;
             font-weight: 700;
-            color: #0F172A;
             font-variant-numeric: tabular-nums;
             line-height: 1.2;
         }
         .sw-kpi-sub {
             font-size: 0.8rem;
-            color: #475569;
+            opacity: 0.75;
             margin-top: 0.35rem;
         }
         .sw-alert-box {

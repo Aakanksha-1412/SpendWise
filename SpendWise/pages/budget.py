@@ -64,16 +64,16 @@ def render_budget_page() -> None:
         with col:
             st.markdown(
                 f"""
-                <div class="sw-card">
-                    <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <strong style="font-size:1.05rem;">{item['category']}</strong>
-                        <span style="font-size:0.72rem;font-weight:700;color:{color};">{status_text}</span>
+                <div class="sw-card" style="border-left:5px solid {color};">
+                    <div class="sw-card-head">
+                        <span class="sw-card-title">{item['category']}</span>
+                        <span class="sw-pill" style="background:{color};">{status_text}</span>
                     </div>
-                    <hr style="margin:0.6rem 0;border:none;border-top:1px solid #F1F5F9;"/>
-                    <div style="font-size:0.85rem;line-height:1.7;">
+                    <hr/>
+                    <div style="font-size:0.88rem;line-height:1.75;">
                         <div>Budget: <b>{format_inr(item['budget'])}</b></div>
                         <div>Spent: <b>{format_inr(item['spent'])}</b></div>
-                        <div style="color:{color};font-weight:600;">Remaining: {format_inr(item['remaining'])}</div>
+                        <div style="color:{color};font-weight:700;">Remaining: {format_inr(item['remaining'])}</div>
                     </div>
                 </div>
                 """,
