@@ -14,6 +14,7 @@ Responsibility:
 import streamlit as st
 import pandas as pd
 
+from database.database import current_user_id
 from tools.ocr_tool import extract_receipt
 from tools.categorization_tool import categorize_expense, merchant_memory_version
 from tools.database_tool import add_transaction, bulk_insert_transactions
@@ -21,10 +22,11 @@ from utils.helpers import CATEGORIES, format_inr
 
 
 @st.cache_data(show_spinner="Categorizing transactions...")
-def _categorize_rows(rows: tuple, memory_version: int) -> list:
+def _categorize_rows(rows: tuple, memory_version: int, user_id: int) -> list:
     """Category for each (merchant, description) row. Cached, so Streamlit reruns
     (e.g. clicking Import) don't repeat the ChromaDB lookups; each distinct row is checked once.
-    `memory_version` is part of the cache key, so newly learned merchants are picked up."""
+    `memory_version` and `user_id` are part of the cache key, so newly learned merchants are
+    picked up and one user's cached categories are never shown to another."""
     unique = {row: categorize_expense(*row) for row in dict.fromkeys(rows)}
     return [unique[row] for row in rows]
 
@@ -57,7 +59,7 @@ def render_upload_page() -> None:
                         csv_df["description"] = "CSV Import"
                     if "category" not in csv_df.columns:
                         rows = tuple(zip(csv_df["merchant"].astype(str), csv_df["description"].astype(str)))
-                        csv_df["category"] = _categorize_rows(rows, merchant_memory_version())
+                        csv_df["category"] = _categorize_rows(rows, merchant_memory_version(), current_user_id())
                     csv_df["source"] = "CSV"
 
                     st.markdown(f"**Preview ({len(csv_df)} rows detected):**")

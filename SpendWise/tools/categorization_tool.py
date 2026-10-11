@@ -21,6 +21,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from database.database import current_user_id
 from utils.helpers import CATEGORIES
 
 logger = logging.getLogger(__name__)
@@ -152,11 +153,16 @@ def semantic_category(merchant: str, description: str = "") -> Optional[str]:
     try:
         # 1. A shop the user already saved: exact lookup by name (no similarity search needed)
         if merchant.strip():
-            exact = memory.get(ids=[f"merchant:{merchant.strip().lower()}"])
+            exact = memory.get(ids=[f"merchant:{current_user_id()}:{merchant.strip().lower()}"])
             if exact["ids"]:
                 return exact["metadatas"][0]["category"]
         # 2. Otherwise: closest meaning among learned shops and category descriptions
-        result = memory.query(query_texts=queries, n_results=5)
+        # Category descriptions are shared; learned shops only from THIS user
+        result = memory.query(
+            query_texts=queries,
+            n_results=5,
+            where={"$or": [{"kind": "description"}, {"user_id": current_user_id()}]},
+        )
     except Exception as exc:
         logger.warning("ChromaDB query failed: %r", exc)
         return None
@@ -190,12 +196,13 @@ def remember_merchant_categories(pairs: List[Tuple[str, str]]) -> None:
     memory = _merchant_memory()
     if memory is None:
         return
+    user_id = current_user_id()  # each user's learned shops are kept separate
     global _memory_version
     try:
         memory.upsert(
-            ids=[f"merchant:{key}" for key in learned],
+            ids=[f"merchant:{user_id}:{key}" for key in learned],
             documents=[name for name, _ in learned.values()],
-            metadatas=[{"category": category, "kind": "learned"} for _, category in learned.values()],
+            metadatas=[{"category": category, "kind": "learned", "user_id": user_id} for _, category in learned.values()],
         )
         _memory_version += 1
     except Exception as exc:

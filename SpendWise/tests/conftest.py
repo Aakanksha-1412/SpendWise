@@ -25,3 +25,13 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))
     monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("SPENDWISE_SEED_DEMO", "true")
+
+
+@pytest.fixture(autouse=True)
+def logged_out():
+    """Each test starts as 'no login' (user 0) and is reset afterwards."""
+    from database.database import set_current_user
+
+    set_current_user(None)
+    yield
+    set_current_user(None)

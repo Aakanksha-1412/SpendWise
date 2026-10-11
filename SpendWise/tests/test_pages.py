@@ -39,13 +39,17 @@ def test_profile_page_saves_income_creates_budgets_and_removes_demo_data():
     app.number_input(key="profile_savings").set_value(3000.0)
     app.number_input(key="profile_usual_Food").set_value(4000.0)
     app.number_input(key="profile_usual_Bills").set_value(2500.0)
-    app.button[0].click().run()  # "Save & create my budgets" (start fresh is ticked by default)
+    next(b for b in app.button if b.label == "Save").click().run()  # start fresh is ticked by default
 
     assert not app.exception
     assert get_profile()["monthly_income"] == 20000.0
     assert get_transactions() == []
     assert get_all_budgets()["Food"] == 4000.0
     assert any("Saved!" in message.value for message in app.success)
+    # after saving: the money plan with charts is shown, the form is folded away
+    assert any("can still spend" in message.value for message in app.success)
+    assert len(app.get("plotly_chart")) == 2
+    assert [e.label for e in app.expander] == ["✏️ Edit my details (income, savings goal, usual spending)"]
 
 
 def test_home_shows_income_and_savings_after_setup():

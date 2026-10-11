@@ -175,3 +175,37 @@ def get_dashboard_ai_insights(month: Optional[int] = None, year: Optional[int] =
         "unused_discretionary": reallocation["unused_discretionary_categories"],
         "spending_spikes": spikes,
     }
+
+
+STATUS_LABELS = {
+    "UNDER BUDGET": "✅ fine",
+    "NEAR LIMIT": "⚠️ almost full",
+    "OVER BUDGET": "🚨 full",
+    "NO BUDGET SET": "– no budget",
+}
+
+
+def get_money_plan(month: Optional[int] = None, year: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """
+    The user's money plan for the month (None until they save a profile):
+    income, savings goal, spent so far, total budgets, what they can still spend while
+    keeping the savings goal, income not assigned to any budget, and a status per category.
+    """
+    profile = get_profile()
+    if profile is None:
+        return None
+    statuses = get_all_budget_statuses(month=month, year=year)
+    income = profile["monthly_income"]
+    savings_goal = profile["savings_goal"]
+    spent = round(sum(s["spent"] for s in statuses), 2)
+    budget_total = round(sum(s["budget"] for s in statuses), 2)
+    return {
+        "monthly_income": income,
+        "savings_goal": savings_goal,
+        "spent": spent,
+        "budget_total": budget_total,
+        "budget_left": round(sum(max(s["remaining"], 0.0) for s in statuses if s["budget"] > 0), 2),
+        "can_still_spend": round(income - savings_goal - spent, 2),
+        "unplanned": round(max(income - savings_goal - budget_total, 0.0), 2),
+        "categories": [{**s, "label": STATUS_LABELS[s["status"]]} for s in statuses],
+    }

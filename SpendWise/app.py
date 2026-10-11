@@ -6,19 +6,23 @@ Owner: Member 4 (Streamlit UI + OCR)
 Responsibility:
 - Configures the Streamlit page layout, custom professional financial CSS styling,
   and SQLite database initialization on startup.
-- Implements multi-page navigation across all 6 core modules:
+- Login gate: until someone logs in, only `pages/login.py` is shown. After login the
+  user's id is set with `set_current_user()` on every page load, so all pages and the
+  AI agent only see that user's data.
+- Implements multi-page navigation across all core modules:
   1. Home (`pages/home.py`)
   2. Transactions (`pages/transactions.py`)
   3. Upload Expense (`pages/upload.py`)
   4. Budget (`pages/budget.py`)
   5. Analytics (`pages/analytics.py`)
   6. AI Assistant (`pages/assistant.py`)
+  7. My Profile & Setup (`pages/profile.py`)
 - Does NOT contain business logic, database queries, or Pandas calculations.
 """
 
 import streamlit as st
 from utils.helpers import period_label
-from database.database import init_db
+from database.database import init_db, set_current_user
 
 # Ensure SQLite tables and initial demo records exist before rendering any page
 init_db()
@@ -88,6 +92,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# -----------------------------------------------------------------------------
+# LOGIN GATE: nobody sees any data before logging in
+# -----------------------------------------------------------------------------
+set_current_user(st.session_state.get("user_id"))
+if st.session_state.get("user_id") is None:
+    st.navigation([st.Page("pages/login.py", title="Log in", icon="🔐")]).run()
+    st.stop()
+
 # Define multipage navigation using Streamlit's modern st.navigation API
 pages = {
     "SpendWise Workspace": [
@@ -110,6 +122,10 @@ pg = st.navigation(pages)
 
 with st.sidebar:
     st.divider()
+    st.markdown(f"👤 Logged in as **{st.session_state.get('username', '')}**")
+    if st.button("Log out", width="stretch"):
+        st.session_state.clear()  # also forgets this session's chat and agent memory
+        st.rerun()
     st.caption(f"**Active Period:** {period_label()}")
     st.caption("**Architecture:** LangGraph + SQLite3 + Pandas + OCR")
 

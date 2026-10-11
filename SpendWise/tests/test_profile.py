@@ -81,3 +81,36 @@ def test_dashboard_numbers_include_income_and_savings():
     assert summary["monthly_income"] == 20000
     assert summary["savings_goal"] == 3000
     assert summary["saved_so_far"] == 19000  # income - spent this month
+
+
+def test_money_plan_numbers():
+    from analytics.analytics import get_money_plan
+    from tools.database_tool import upsert_budget
+
+    database.init_db()
+    remove_all_data()
+    save_profile(monthly_income=20000, savings_goal=3000, usual_spending={})
+    upsert_budget("Food", 4000)
+    upsert_budget("Shopping", 1000)
+    add_transaction({"merchant": "Swiggy", "amount": 3500, "category": "Food", "date": ""})
+    add_transaction({"merchant": "Myntra", "amount": 1200, "category": "Shopping", "date": ""})
+
+    plan = get_money_plan()
+
+    assert plan["monthly_income"] == 20000
+    assert plan["spent"] == 4700
+    assert plan["can_still_spend"] == 12300  # 20,000 - 3,000 savings - 4,700 spent
+    assert plan["budget_total"] == 5000
+    assert plan["unplanned"] == 12000  # income not given to any budget or savings
+    labels = {row["category"]: row["label"] for row in plan["categories"]}
+    assert labels["Food"] == "⚠️ almost full"  # 87.5% used
+    assert labels["Shopping"] == "🚨 full"  # over budget
+    assert labels["Bills"] == "– no budget"
+
+
+def test_no_money_plan_without_a_profile():
+    from analytics.analytics import get_money_plan
+
+    database.init_db()
+
+    assert get_money_plan() is None

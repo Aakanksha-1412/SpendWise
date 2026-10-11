@@ -5,21 +5,22 @@ Owner: Member 2 (Database + Categorization)
 
 Responsibility:
 - Manages the SQLite3 database connection (`spendwise.db`).
-- Initializes the required tables (`transactions` and `budgets`).
-- Seeds realistic initial demo data on first run so the dashboard and analytics
-  work out-of-the-box for all team members. Demo dates are relative to TODAY, so the
-  demo always shows "this month" and "this week" data.
-- Set SPENDWISE_SEED_DEMO=false (in SpendWise/.env) to start with EMPTY tables and
-  use only your real expenses. (Only affects a new/empty database: delete
-  data/spendwise.db to start over.) Demo data is also never added once the user has
-  saved a profile on the "My Profile" page.
-- Stores the user's profile (monthly income, savings goal) and usual monthly spending.
+- Creates the tables: users, transactions, budgets, profile, usual_spending.
+- Every row belongs to a user (`user_id`). The logged-in user of the current browser
+  session is set with `set_current_user()` (done by app.py after login), and
+  `tools/database_tool.py` only reads/writes that user's rows.
+  user_id 0 = data created without login (tests, or data from before login existed).
+- Upgrades an older database (without user_id columns) automatically, keeping its data.
+- Demo data (dated relative to TODAY) is added automatically only for user 0 on a new
+  database; a new account can choose to start with it (`seed_demo_data`).
+  Set SPENDWISE_SEED_DEMO=false (in SpendWise/.env) to never add it automatically.
 - NOTE: UI pages (`pages/*.py`) must NEVER write raw SQL queries directly.
-  All reads/writes go through `tools/database_tool.py`.
+  All reads/writes go through `tools/database_tool.py` (and `tools/auth_tool.py` for accounts).
 """
 
 import os
 import sqlite3
+from contextvars import ContextVar
 from datetime import date, datetime, timedelta
 from typing import Optional
 
@@ -27,6 +28,20 @@ from utils.helpers import get_setting
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.getenv("SPENDWISE_DB_PATH", os.path.join(PROJECT_DIR, "data", "spendwise.db"))
+
+NO_LOGIN_USER = 0
+# Who is logged in for the code running right now (each Streamlit session has its own value)
+_current_user: ContextVar[int] = ContextVar("spendwise_current_user", default=NO_LOGIN_USER)
+
+
+def set_current_user(user_id: Optional[int]) -> None:
+    """Called by app.py on every page load with the logged-in user's id."""
+    _current_user.set(int(user_id) if user_id else NO_LOGIN_USER)
+
+
+def current_user_id() -> int:
+    """The user whose data should be read/written right now."""
+    return _current_user.get()
 
 
 def seed_demo_enabled() -> bool:
@@ -47,17 +62,22 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
 
 def init_db(db_path: Optional[str] = None, allow_demo: bool = True) -> None:
     """
-    Create the `transactions` and `budgets` tables if they do not exist,
-    and populate initial demo records if the database is empty.
+    Create (or upgrade) the tables, and add demo data for user 0 on a brand-new database.
     """
     conn = get_connection(db_path)
-    cursor = conn.cursor()
-
-    # 1. Create transactions table
-    cursor.execute(
+    _upgrade_old_tables(conn)
+    conn.executescript(
         """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
             date TEXT NOT NULL,
             merchant TEXT NOT NULL,
             amount REAL NOT NULL,
@@ -65,64 +85,112 @@ def init_db(db_path: Optional[str] = None, allow_demo: bool = True) -> None:
             description TEXT DEFAULT '',
             source TEXT DEFAULT 'Text',
             created_at TEXT NOT NULL
-        )
-        """
-    )
-
-    # 2. Create budgets table
-    cursor.execute(
-        """
+        );
+        CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id);
         CREATE TABLE IF NOT EXISTS budgets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
             category TEXT NOT NULL,
             monthly_budget REAL NOT NULL,
             month INTEGER NOT NULL,
             year INTEGER NOT NULL,
-            UNIQUE(category, month, year)
-        )
-        """
-    )
-
-    # 3. The user's own profile (one row): monthly income + savings goal
-    cursor.execute(
-        """
+            UNIQUE(user_id, category, month, year)
+        );
         CREATE TABLE IF NOT EXISTS profile (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
+            user_id INTEGER PRIMARY KEY,
             monthly_income REAL NOT NULL,
             savings_goal REAL NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL
-        )
-        """
-    )
-
-    # 4. What the user usually spends per category in a month (used to suggest budgets)
-    cursor.execute(
-        """
+        );
         CREATE TABLE IF NOT EXISTS usual_spending (
-            category TEXT PRIMARY KEY,
-            amount REAL NOT NULL
-        )
+            user_id INTEGER NOT NULL DEFAULT 0,
+            category TEXT NOT NULL,
+            amount REAL NOT NULL,
+            PRIMARY KEY (user_id, category)
+        );
         """
     )
-
     conn.commit()
-    # Demo data only for a brand-new database: never once the user has set up a profile
+    # Demo data only for "no login" data on a brand-new database, never once a profile exists
     # (init_db runs on every query, so the cheap checks come first)
-    if allow_demo and _any_table_empty(conn) and not _profile_exists(conn) and seed_demo_enabled():
-        _seed_initial_data_if_empty(conn)
+    if (
+        allow_demo
+        and _user_data_empty(conn, NO_LOGIN_USER)
+        and not _profile_exists(conn, NO_LOGIN_USER)
+        and seed_demo_enabled()
+    ):
+        seed_demo_data(conn, NO_LOGIN_USER)
     conn.close()
 
 
-def _any_table_empty(conn: sqlite3.Connection) -> bool:
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT (SELECT COUNT(*) FROM budgets) = 0 OR (SELECT COUNT(*) FROM transactions) = 0 AS empty"
+def _columns(conn: sqlite3.Connection, table: str) -> list:
+    return [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+
+
+def _rebuild(conn: sqlite3.Connection, table: str, create_sql: str, copy_columns: str) -> None:
+    """Recreate `table` with a new layout, copying old rows to user 0."""
+    conn.executescript(
+        f"""
+        ALTER TABLE {table} RENAME TO {table}_before_login;
+        {create_sql};
+        INSERT INTO {table} (user_id, {copy_columns}) SELECT 0, {copy_columns} FROM {table}_before_login;
+        DROP TABLE {table}_before_login;
+        """
     )
-    return bool(cursor.fetchone()["empty"])
 
 
-def _profile_exists(conn: sqlite3.Connection) -> bool:
-    return conn.execute("SELECT COUNT(*) FROM profile").fetchone()[0] > 0
+def _upgrade_old_tables(conn: sqlite3.Connection) -> None:
+    """
+    Databases created before login existed have no user_id columns. Add them (keeping
+    every row, owned by user 0) so existing data is not lost.
+    """
+    columns = _columns(conn, "transactions")
+    if columns and "user_id" not in columns:
+        conn.execute("ALTER TABLE transactions ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0")
+
+    # These tables need a new primary key / unique rule, so they are rebuilt.
+    columns = _columns(conn, "budgets")
+    if columns and "user_id" not in columns:
+        _rebuild(
+            conn,
+            "budgets",
+            "CREATE TABLE budgets (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL DEFAULT 0, "
+            "category TEXT NOT NULL, monthly_budget REAL NOT NULL, month INTEGER NOT NULL, year INTEGER NOT NULL, "
+            "UNIQUE(user_id, category, month, year))",
+            "category, monthly_budget, month, year",
+        )
+    columns = _columns(conn, "profile")
+    if columns and "user_id" not in columns:
+        _rebuild(
+            conn,
+            "profile",
+            "CREATE TABLE profile (user_id INTEGER PRIMARY KEY, monthly_income REAL NOT NULL, "
+            "savings_goal REAL NOT NULL DEFAULT 0, updated_at TEXT NOT NULL)",
+            "monthly_income, savings_goal, updated_at",
+        )
+    columns = _columns(conn, "usual_spending")
+    if columns and "user_id" not in columns:
+        _rebuild(
+            conn,
+            "usual_spending",
+            "CREATE TABLE usual_spending (user_id INTEGER NOT NULL DEFAULT 0, category TEXT NOT NULL, "
+            "amount REAL NOT NULL, PRIMARY KEY (user_id, category))",
+            "category, amount",
+        )
+    conn.commit()
+
+
+def _user_data_empty(conn: sqlite3.Connection, user_id: int) -> bool:
+    row = conn.execute(
+        "SELECT (SELECT COUNT(*) FROM budgets WHERE user_id = ?) = 0 "
+        "OR (SELECT COUNT(*) FROM transactions WHERE user_id = ?) = 0",
+        (user_id, user_id),
+    ).fetchone()
+    return bool(row[0])
+
+
+def _profile_exists(conn: sqlite3.Connection, user_id: int) -> bool:
+    return conn.execute("SELECT COUNT(*) FROM profile WHERE user_id = ?", (user_id,)).fetchone()[0] > 0
 
 
 def _demo_date(days_ago: int, current_period: bool) -> str:
@@ -137,17 +205,17 @@ def _demo_date(days_ago: int, current_period: bool) -> str:
     return day.strftime("%d-%m-%Y")
 
 
-def _seed_initial_data_if_empty(conn: sqlite3.Connection) -> None:
+def seed_demo_data(conn: sqlite3.Connection, user_id: int) -> None:
     """
-    Populate demo budgets (for the current month) and demo transactions (relative to today)
-    if the tables are empty. Designed to demonstrate:
+    Give `user_id` demo budgets (current month) and demo transactions (relative to today),
+    for any of those tables that is still empty for this user. Designed to demonstrate:
     - Shopping exceeding its budget by ₹2,100 this month (Spent: ₹6,100 vs Budget: ₹4,000)
     - A weekly Food spending spike (previous 7 days: ₹1,500 vs last 7 days: ₹3,000)
     """
     cursor = conn.cursor()
     today = date.today()
 
-    cursor.execute("SELECT COUNT(*) as cnt FROM budgets")
+    cursor.execute("SELECT COUNT(*) as cnt FROM budgets WHERE user_id = ?", (user_id,))
     if cursor.fetchone()["cnt"] == 0:
         default_budgets = [
             ("Food", 5000.0),
@@ -161,13 +229,13 @@ def _seed_initial_data_if_empty(conn: sqlite3.Connection) -> None:
         ]
         cursor.executemany(
             """
-            INSERT INTO budgets (category, monthly_budget, month, year)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO budgets (user_id, category, monthly_budget, month, year)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            [(category, amount, today.month, today.year) for category, amount in default_budgets],
+            [(user_id, category, amount, today.month, today.year) for category, amount in default_budgets],
         )
 
-    cursor.execute("SELECT COUNT(*) as cnt FROM transactions")
+    cursor.execute("SELECT COUNT(*) as cnt FROM transactions WHERE user_id = ?", (user_id,))
     if cursor.fetchone()["cnt"] == 0:
         now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         # (days ago, merchant, amount, category, description, source)
@@ -196,16 +264,16 @@ def _seed_initial_data_if_empty(conn: sqlite3.Connection) -> None:
             (0, "Crossword", 390.0, "Others", "Stationery & notebooks", "Text"),
         ]
         seed_transactions = [
-            (_demo_date(days, current_period=False), merchant, amount, category, description, source, now_iso)
+            (user_id, _demo_date(days, current_period=False), merchant, amount, category, description, source, now_iso)
             for days, merchant, amount, category, description, source in previous_week
         ] + [
-            (_demo_date(days, current_period=True), merchant, amount, category, description, source, now_iso)
+            (user_id, _demo_date(days, current_period=True), merchant, amount, category, description, source, now_iso)
             for days, merchant, amount, category, description, source in this_week
         ]
         cursor.executemany(
             """
-            INSERT INTO transactions (date, merchant, amount, category, description, source, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO transactions (user_id, date, merchant, amount, category, description, source, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             seed_transactions,
         )

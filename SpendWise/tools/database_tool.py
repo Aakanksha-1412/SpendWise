@@ -6,6 +6,7 @@ Owner: Member 2 (Database + Categorization)
 Responsibility:
 - Exposes clean Python functions & LangChain tool interfaces for reading/writing
   transactions and budgets in SQLite.
+- Every function reads/writes only the LOGGED-IN user's rows (`current_user_id()`).
 - Ensures UI pages (`pages/*.py`) and the AI Agent (`agent/graph.py`) never execute
   raw SQL strings directly.
 """
@@ -20,7 +21,7 @@ except ImportError:
     pd = None  # type: ignore
     PANDAS_AVAILABLE = False
 
-from database.database import get_connection, init_db
+from database.database import current_user_id, get_connection, init_db
 from tools.categorization_tool import remember_merchant_categories, remember_merchant_category
 from utils.helpers import normalize_date, resolve_period, CATEGORIES
 
@@ -63,10 +64,10 @@ def add_transaction(transaction: Dict[str, Any], learn_category: bool = True) ->
 
     cursor.execute(
         """
-        INSERT INTO transactions (date, merchant, amount, category, description, source, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO transactions (user_id, date, merchant, amount, category, description, source, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (date_str, merchant, amount, category, description, source, created_at),
+        (current_user_id(), date_str, merchant, amount, category, description, source, created_at),
     )
     new_id = cursor.lastrowid
     conn.commit()
@@ -110,8 +111,11 @@ def get_transactions(
     conn = get_connection()
     cursor = conn.cursor()
 
-    query = "SELECT id, date, merchant, amount, category, description, source, created_at FROM transactions WHERE 1=1"
-    params: List[Any] = []
+    query = (
+        "SELECT id, date, merchant, amount, category, description, source, created_at "
+        "FROM transactions WHERE user_id = ?"
+    )
+    params: List[Any] = [current_user_id()]
 
     if category and category != "All":
         query += " AND category = ?"
@@ -223,10 +227,10 @@ def get_all_budgets(month: Optional[int] = None, year: Optional[int] = None) -> 
     cursor.execute(
         """
         SELECT category, monthly_budget FROM budgets
-        WHERE year * 12 + month <= ?
+        WHERE user_id = ? AND year * 12 + month <= ?
         ORDER BY year * 12 + month DESC
         """,
-        (year * 12 + month,),
+        (current_user_id(), year * 12 + month),
     )
     rows = cursor.fetchall()
     conn.close()
@@ -250,12 +254,12 @@ def upsert_budget(category: str, monthly_budget: float, month: Optional[int] = N
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO budgets (category, monthly_budget, month, year)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(category, month, year)
+        INSERT INTO budgets (user_id, category, monthly_budget, month, year)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, category, month, year)
         DO UPDATE SET monthly_budget = excluded.monthly_budget
         """,
-        (category, float(monthly_budget), month, year),
+        (current_user_id(), category, float(monthly_budget), month, year),
     )
     conn.commit()
     conn.close()
@@ -271,9 +275,10 @@ def get_profile() -> Optional[Dict[str, Any]]:
     """
     init_db()
     conn = get_connection()
-    row = conn.execute("SELECT monthly_income, savings_goal FROM profile WHERE id = 1").fetchone()
+    user_id = current_user_id()
+    row = conn.execute("SELECT monthly_income, savings_goal FROM profile WHERE user_id = ?", (user_id,)).fetchone()
     usual = {cat: 0.0 for cat in CATEGORIES}
-    for r in conn.execute("SELECT category, amount FROM usual_spending"):
+    for r in conn.execute("SELECT category, amount FROM usual_spending WHERE user_id = ?", (user_id,)):
         if r["category"] in usual:
             usual[r["category"]] = float(r["amount"])
     conn.close()
@@ -292,18 +297,18 @@ def save_profile(monthly_income: float, savings_goal: float, usual_spending: Dic
     conn = get_connection()
     conn.execute(
         """
-        INSERT INTO profile (id, monthly_income, savings_goal, updated_at) VALUES (1, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET monthly_income = excluded.monthly_income,
+        INSERT INTO profile (user_id, monthly_income, savings_goal, updated_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET monthly_income = excluded.monthly_income,
             savings_goal = excluded.savings_goal, updated_at = excluded.updated_at
         """,
-        (float(monthly_income), float(savings_goal), datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        (current_user_id(), float(monthly_income), float(savings_goal), datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
     )
     conn.executemany(
         """
-        INSERT INTO usual_spending (category, amount) VALUES (?, ?)
-        ON CONFLICT(category) DO UPDATE SET amount = excluded.amount
+        INSERT INTO usual_spending (user_id, category, amount) VALUES (?, ?, ?)
+        ON CONFLICT(user_id, category) DO UPDATE SET amount = excluded.amount
         """,
-        [(cat, float(usual_spending.get(cat, 0.0) or 0.0)) for cat in CATEGORIES],
+        [(current_user_id(), cat, float(usual_spending.get(cat, 0.0) or 0.0)) for cat in CATEGORIES],
     )
     conn.commit()
     conn.close()
@@ -311,14 +316,14 @@ def save_profile(monthly_income: float, savings_goal: float, usual_spending: Dic
 
 def remove_all_data() -> int:
     """
-    "Start fresh": delete ALL transactions and budgets (e.g. the demo data).
+    "Start fresh": delete ALL of this user's transactions and budgets (e.g. the demo data).
     Returns how many transactions were removed. Save a profile right after, so demo data
     is not added again.
     """
     init_db(allow_demo=False)
     conn = get_connection()
-    removed = conn.execute("DELETE FROM transactions").rowcount
-    conn.execute("DELETE FROM budgets")
+    removed = conn.execute("DELETE FROM transactions WHERE user_id = ?", (current_user_id(),)).rowcount
+    conn.execute("DELETE FROM budgets WHERE user_id = ?", (current_user_id(),))
     conn.commit()
     conn.close()
     return removed

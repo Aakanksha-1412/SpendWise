@@ -31,7 +31,7 @@ from tools.budget_tool import (
     suggest_discretionary_reallocation,
 )
 from tools.categorization_tool import categorize_expense
-from tools.database_tool import add_transaction, get_profile, get_transactions
+from tools.database_tool import add_transaction, get_profile, get_transactions, save_profile, upsert_budget
 from tools.ocr_tool import extract_receipt
 from tools.spike_detector import detect_all_category_spikes, detect_spending_spike
 from utils.helpers import CATEGORIES, normalize_date, to_iso_date
@@ -235,11 +235,59 @@ def add_expense(
             "source": source,
         }
     )
-    return {
+    result = {
         "saved": True,
         "transaction": saved,
         "budget_after_saving": calculate_budget_status(official),
     }
+    savings = _savings_check()
+    if savings:
+        result["savings_after_saving"] = savings
+    return result
+
+
+def _savings_check() -> Optional[Dict[str, Any]]:
+    """After a new expense: is the user's savings goal still safe this month? (None without a profile)"""
+    summary = get_summary_metrics()
+    if summary["monthly_income"] is None:
+        return None
+    below_by = round(max(summary["savings_goal"] - summary["saved_so_far"], 0.0), 2)
+    return {
+        "monthly_income": summary["monthly_income"],
+        "savings_goal": summary["savings_goal"],
+        "left_after_spending": summary["saved_so_far"],
+        "below_savings_goal_by": below_by,
+        "savings_goal_at_risk": below_by > 0,
+    }
+
+
+@tool
+def set_budget(category: str, amount: float) -> Dict[str, Any]:
+    """CHANGE this month's budget for one category, e.g. "set my food budget to 5000".
+    Only call this when the user clearly asks to set/change a budget."""
+    official, error = _match_category(category)
+    if error:
+        return {**error, "saved": False}
+    if amount < 0:
+        return {"error": "A budget can't be negative.", "saved": False}
+    upsert_budget(official, amount)
+    return {"saved": True, "budget_status": calculate_budget_status(official)}
+
+
+@tool
+def update_my_profile(monthly_income: Optional[float] = None, savings_goal: Optional[float] = None) -> Dict[str, Any]:
+    """CHANGE the user's monthly income and/or monthly savings goal, e.g. "my income is now
+    25000" or "I want to save 4000 a month". Leave out what didn't change. Only call this
+    when the user clearly asks."""
+    profile = get_profile()
+    income = monthly_income if monthly_income is not None else (profile["monthly_income"] if profile else None)
+    goal = savings_goal if savings_goal is not None else (profile["savings_goal"] if profile else 0.0)
+    if income is None or income <= 0:
+        return {"error": "Ask the user for their monthly income (more than 0).", "saved": False}
+    if goal < 0 or goal > income:
+        return {"error": "The savings goal must be between 0 and the monthly income.", "saved": False}
+    save_profile(income, goal, profile["usual_spending"] if profile else {})
+    return {"saved": True, "monthly_income": income, "savings_goal": goal, "savings_now": _savings_check()}
 
 
 @tool
@@ -275,5 +323,7 @@ ALL_TOOLS = [
     check_affordability,
     suggest_category,
     add_expense,
+    set_budget,
+    update_my_profile,
     read_uploaded_receipt,
 ]

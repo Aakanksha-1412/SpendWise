@@ -53,7 +53,8 @@ SpendWise/
 │   ├── budget.py                 # Monthly category budget configuration & status cards
 │   ├── analytics.py              # 6 Plotly financial charts + Automated Spike Detection banner
 │   ├── assistant.py              # Ask SpendWise AI chat interface with LangGraph trace viewer
-│   └── profile.py                # My Profile & Setup: income, savings goal, usual spending, start fresh
+│   ├── profile.py                # My Profile & Money Plan: income, savings goal, usual spending, charts
+│   └── login.py                  # Log in / create account (shown until someone logs in)
 │
 ├── agent/                        # Member 1: LangGraph Agentic Orchestrator
 │   ├── graph.py                  # Gemini + LangGraph loop (agent ⇄ tools), run_agent() entry point
@@ -66,6 +67,7 @@ SpendWise/
 │   └── tests/                    # Agent tests (fake Gemini, temporary database)
 │
 ├── tools/                        # Deterministic Agent & UI Tools
+│   ├── auth_tool.py              # Member 2: accounts; passwords stored only as salted PBKDF2 hashes
 │   ├── ocr_tool.py               # Member 4: Receipt image -> Merchant, Date, Items, Tax, Total (Gemini Vision / Tesseract)
 │   ├── database_tool.py          # Member 2: SQLite CRUD & query interfaces
 │   ├── categorization_tool.py    # Member 2: Keywords + ChromaDB semantic categorization & NL expense parser
@@ -170,6 +172,17 @@ python -m pytest agent/tests tests -v
 | **ChromaDB** | `tools/categorization_tool.py` | Semantic merchant memory: "Chai Point" → Food; learns from saved expenses |
 | **Plotly** | `pages/home.py`, `pages/analytics.py` | Interactive charts |
 | **Memory** | `agent/memory.py` + SQLite + ChromaDB | Chat follow-ups ("yes, log it"), stored data, learned merchants |
+
+### Accounts (login)
+The app opens on a **Log in / Create account** screen. Each account only sees its own expenses,
+budgets, profile and learned shops. Passwords are never stored, only salted PBKDF2-SHA256 hashes.
+A new account can start with demo data, or take over data saved on this computer before login
+existed (older databases are upgraded automatically, keeping their data).
+
+### Asking the assistant about money
+- "How much can I still save this month?" / "Am I on track?" (uses your profile)
+- "Set my food budget to 5000" / "My income is now 25000" / "I want to save 4000" (changes them)
+- When you add an expense in chat and it eats into your savings goal, SpendWise warns you.
 
 ### Using your own data
 Open **👤 My Profile & Setup**, enter your monthly income, savings goal and usual spending per

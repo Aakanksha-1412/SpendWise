@@ -61,3 +61,46 @@ def test_profile_tool_tells_gemini_income_and_savings():
     assert result["monthly_income"] == 20000
     assert result["savings_goal"] == 3000
     assert "left_after_spending" in result
+
+
+def _fresh_user_with_profile(income, savings):
+    from tools.database_tool import remove_all_data, save_profile
+
+    save_profile(monthly_income=income, savings_goal=savings, usual_spending={})
+    remove_all_data()
+
+
+def test_adding_an_expense_reports_when_it_eats_into_the_savings_goal():
+    _fresh_user_with_profile(income=10000, savings=3000)
+    add_expense.invoke({"merchant": "Myntra", "amount": 6500, "category": "Shopping"})
+
+    result = add_expense.invoke({"merchant": "Croma", "amount": 900, "category": "Shopping"})
+
+    savings = result["savings_after_saving"]
+    assert savings["left_after_spending"] == 2600  # 10,000 - 7,400
+    assert savings["below_savings_goal_by"] == 400  # goal 3,000
+    assert savings["savings_goal_at_risk"] is True
+
+
+def test_chat_can_set_a_budget():
+    from agent.tools_registry import set_budget
+    from tools.database_tool import get_all_budgets
+
+    result = set_budget.invoke({"category": "food", "amount": 5000})
+
+    assert result["saved"] is True
+    assert get_all_budgets()["Food"] == 5000.0
+    assert set_budget.invoke({"category": "Food", "amount": -10})["saved"] is False
+
+
+def test_chat_can_update_income_and_savings_goal():
+    from agent.tools_registry import update_my_profile
+    from tools.database_tool import get_profile
+
+    _fresh_user_with_profile(income=10000, savings=2000)
+
+    result = update_my_profile.invoke({"monthly_income": 25000, "savings_goal": 4000})
+
+    assert result["saved"] is True
+    assert get_profile()["monthly_income"] == 25000 and get_profile()["savings_goal"] == 4000
+    assert update_my_profile.invoke({"savings_goal": 99999})["saved"] is False  # more than income
