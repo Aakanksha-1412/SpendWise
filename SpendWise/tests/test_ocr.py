@@ -86,3 +86,39 @@ def test_detects_when_a_receipt_date_is_outside_the_current_month():
         assert is_in_current_month("05-10-2026") is True
         assert is_in_current_month("03-03-2026") is False  # old bill
         assert is_in_current_month("not a date") is False
+
+
+def test_receipt_amounts_with_indian_commas():
+    receipt = parse_receipt_text("Croma Electronics\n20-10-2026\nLaptop 1,25,000.00\nGrand Total Rs 1,25,000.00")
+
+    assert receipt["total"] == 125000.0
+
+
+def test_total_gst_line_is_tax_not_the_bill_total():
+    receipt = parse_receipt_text("Cafe Coffee Day\n20-10-2026\nCappuccino 250.00\nSandwich 300.00\nTotal 550.00\nTotal GST 26.20")
+
+    assert receipt["total"] == 550.0 and receipt["tax"] == 26.2
+
+
+def test_cash_handed_over_and_change_are_not_the_bill_total():
+    receipt = parse_receipt_text("Cafe Coffee Day\n20-10-2026\nCappuccino 550.00\nTotal 550.00\nAmount Paid 1000.00\nChange 450.00")
+
+    assert receipt["total"] == 550.0
+    assert [item["name"] for item in receipt["items"]] == ["Cappuccino"]
+
+
+def test_amount_paid_is_used_when_there_is_no_total_line():
+    assert parse_receipt_text("Chai Point\n20-10-2026\nMasala Chai 40.00\nAmount Paid 40.00")["total"] == 40.0
+
+
+def test_heading_lines_are_not_the_shop_name_and_percentages_are_not_tax():
+    receipt = parse_receipt_text("TAX INVOICE\nBehrouz Biryani\n20-10-2026\nBiryani 450.00\nCGST @ 2.5%\nTotal 471.00")
+
+    assert receipt["merchant"] == "Behrouz Biryani"
+    assert receipt["tax"] == 0.0 and receipt["total"] == 471.0
+
+
+def test_total_including_gst_is_still_the_bill_total():
+    receipt = parse_receipt_text("Dominos\n20-10-2026\nPizza 500.00\nCGST 2.5% 12.50\nSGST 2.5% 12.50\nTotal (incl. GST) 525.00")
+
+    assert receipt["total"] == 525.0 and receipt["tax"] == 25.0
