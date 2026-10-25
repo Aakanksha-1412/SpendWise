@@ -83,6 +83,38 @@ def test_dashboard_numbers_include_income_and_savings():
     assert summary["saved_so_far"] == 19000  # income - spent this month
 
 
+def test_remaining_budget_is_never_more_than_the_money_really_left():
+    from tools.database_tool import upsert_budget
+
+    database.init_db()
+    remove_all_data()
+    save_profile(monthly_income=200000, savings_goal=50000, usual_spending={})
+    upsert_budget("Education", 450000)  # saved before budgets were limited to the income
+    upsert_budget("Food", 20000)
+    add_transaction({"merchant": "Swiggy", "amount": 11400, "category": "Food", "date": ""})
+
+    summary = get_summary_metrics()
+
+    assert summary["monthly_budget"] == 470000
+    assert summary["remaining_budget"] == 138600  # 2,00,000 - 50,000 - 11,400, not 4,58,600
+    assert summary["budget_over_plan"] is True and summary["can_plan"] == 150000
+
+
+def test_remaining_budget_is_unchanged_when_budgets_fit():
+    from tools.database_tool import upsert_budget
+
+    database.init_db()
+    remove_all_data()
+    save_profile(monthly_income=20000, savings_goal=3000, usual_spending={})
+    upsert_budget("Food", 4000)
+    add_transaction({"merchant": "Swiggy", "amount": 1000, "category": "Food", "date": ""})
+
+    summary = get_summary_metrics()
+
+    assert summary["remaining_budget"] == 3000  # 4,000 budget - 1,000 spent
+    assert summary["budget_over_plan"] is False
+
+
 def test_money_plan_numbers():
     from analytics.analytics import get_money_plan
     from tools.database_tool import upsert_budget

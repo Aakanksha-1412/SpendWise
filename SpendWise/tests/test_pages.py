@@ -80,6 +80,20 @@ def test_home_shows_income_and_savings_after_setup():
     assert not any("demo numbers" in i.value for i in app.info)
 
 
+def test_home_cards_do_not_show_money_the_user_does_not_have():
+    from tools.database_tool import remove_all_data, save_profile, upsert_budget
+
+    save_profile(200000, 50000, {})
+    remove_all_data()
+    upsert_budget("Education", 450000)  # saved before budgets were limited to the income
+
+    app = AppTest.from_file(str(PAGES / "home.py"), default_timeout=60).run()
+
+    text = " ".join(m.value for m in app.markdown)
+    assert "₹150,000</div>" in text and "Left to spend this month" in text
+    assert "More than you can plan (₹150,000)" in text
+
+
 def test_profile_edit_has_only_income_and_savings_and_keeps_budgets():
     from tools.database_tool import get_all_budgets, get_profile, remove_all_data, save_profile, upsert_budget
 

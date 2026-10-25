@@ -79,6 +79,11 @@ def render_home_page() -> None:
             f"**Savings goal:** {format_inr(summary['savings_goal'])} "
             + ("✅ on track" if on_track else "⚠️ not on track — spending is eating into your savings goal")
         )
+    if summary["budget_over_plan"]:
+        budget_sub = f'<span style="color:#DC2626;">More than you can plan ({format_inr(summary["can_plan"])})</span>'
+    else:
+        budget_sub = "Defined category limits"
+    remaining_sub = "Left to spend this month" if summary["monthly_income"] is not None else "Available monthly buffer"
     kpi_cols = st.columns(4)
 
     with kpi_cols[0]:
@@ -99,7 +104,7 @@ def render_home_page() -> None:
             <div class="sw-card">
                 <div class="sw-kpi-label">Monthly Budget</div>
                 <div class="sw-kpi-value">{format_inr(summary['monthly_budget'])}</div>
-                <div class="sw-kpi-sub">Defined category limits</div>
+                <div class="sw-kpi-sub">{budget_sub}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -112,7 +117,7 @@ def render_home_page() -> None:
             <div class="sw-card">
                 <div class="sw-kpi-label">Remaining Budget</div>
                 <div class="sw-kpi-value" style="color: {rem_color};">{format_inr(summary['remaining_budget'])}</div>
-                <div class="sw-kpi-sub">Available monthly buffer</div>
+                <div class="sw-kpi-sub">{remaining_sub}</div>
             </div>
             """,
             unsafe_allow_html=True,

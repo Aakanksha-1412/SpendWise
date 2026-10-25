@@ -48,11 +48,17 @@ def get_summary_metrics(month: Optional[int] = None, year: Optional[int] = None)
     income = profile["monthly_income"] if profile else None
     savings_goal = profile["savings_goal"] if profile else None
     saved_so_far = round(income - total_spent, 2) if profile else None
+    # Budgets can't promise more than the money really left after the savings goal
+    can_plan = round(income - savings_goal, 2) if profile else None
+    if profile:
+        remaining_budget = round(min(remaining_budget, can_plan - total_spent), 2)
 
     return {
         "total_spent": round(total_spent, 2),
         "monthly_budget": round(total_budget, 2),
-        "remaining_budget": remaining_budget,
+        "remaining_budget": remaining_budget,  # with a profile: never more than income - savings - spent
+        "can_plan": can_plan,  # income - savings goal (None without a profile)
+        "budget_over_plan": bool(profile) and total_budget > can_plan,
         "budget_alerts_count": len(over_budget_list) + len(spikes),
         "over_budget_categories": over_budget_list,
         "near_limit_categories": near_limit_list,
