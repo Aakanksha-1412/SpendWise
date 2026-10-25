@@ -18,8 +18,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from analytics.analytics import get_money_plan
-from tools.budget_tool import suggest_budgets
-from tools.database_tool import get_profile, get_transactions, remove_all_data, save_profile, upsert_budget
+from tools.budget_tool import check_budgets_fit, suggest_budgets
+from tools.database_tool import get_all_budgets, get_profile, get_transactions, remove_all_data, save_profile, upsert_budget
 from utils.helpers import CATEGORIES, format_inr, period_label
 
 
@@ -148,12 +148,16 @@ def render_setup_form() -> None:
         submitted = st.form_submit_button("Save & create my budgets", type="primary")
 
     if submitted and _valid(income, savings_goal):
-        save_profile(income, savings_goal, {})  # profile first: demo data then never returns
-        removed = remove_all_data() if start_fresh else 0
         if any(amount for amount in typed.values()):
             budgets = {cat: amount or 0.0 for cat, amount in typed.items()}
         else:
             budgets = suggest_budgets(income, savings_goal, {})
+        too_much = check_budgets_fit(budgets, income, savings_goal)
+        if too_much:
+            st.error(too_much)
+            return
+        save_profile(income, savings_goal, {})  # profile first: demo data then never returns
+        removed = remove_all_data() if start_fresh else 0
         for cat, amount in budgets.items():
             upsert_budget(cat, amount)
         message = f"Saved! Your {period_label()} budgets total {format_inr(sum(budgets.values()))}."
@@ -172,6 +176,11 @@ def render_edit_form(profile) -> None:
         submitted = st.form_submit_button("Save", type="primary")
 
     if submitted and _valid(income, savings_goal):
+        # "Start fresh" removes the budgets too, so then there is nothing that has to fit
+        too_much = None if start_fresh else check_budgets_fit(get_all_budgets(), income, savings_goal)
+        if too_much:
+            st.error(f"{too_much} Lower your budgets on the 🎯 Budget page first.")
+            return
         save_profile(income, savings_goal, profile["usual_spending"])
         message = "Saved!"
         if start_fresh:

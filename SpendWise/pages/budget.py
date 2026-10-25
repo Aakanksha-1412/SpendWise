@@ -14,7 +14,7 @@ import streamlit as st
 import pandas as pd
 
 from analytics.analytics import get_money_plan
-from tools.budget_tool import get_all_budget_statuses
+from tools.budget_tool import check_budgets_fit, get_all_budget_statuses
 from tools.database_tool import upsert_budget
 from utils.helpers import CATEGORIES, format_inr, period_label
 
@@ -30,12 +30,11 @@ def render_budget_page() -> None:
 
     plan = get_money_plan()
     if plan:
-        if plan["budgets_over_available"] > 0:
-            st.warning(
-                f"⚠️ Your budgets add up to {format_inr(plan['budget_total'])} — "
-                f"{format_inr(plan['budgets_over_available'])} more than you can spend "
-                f"(income {format_inr(plan['monthly_income'])} − savings goal {format_inr(plan['savings_goal'])})."
-            )
+        too_much = check_budgets_fit(
+            {s["category"]: s["budget"] for s in statuses}, plan["monthly_income"], plan["savings_goal"]
+        )
+        if too_much:
+            st.warning(f"⚠️ {too_much}")
         else:
             st.caption(
                 f"Your budgets total {format_inr(plan['budget_total'])} of the "
@@ -58,11 +57,17 @@ def render_budget_page() -> None:
                         value=float(item["budget"]),
                         step=500.0,
                     )
+            if plan:
+                st.caption(f"All budgets together can be at most {format_inr(plan['available_to_spend'])}.")
             if st.form_submit_button("Save Monthly Budgets", type="primary"):
-                for cat, val in updated_values.items():
-                    upsert_budget(cat, val)
-                st.success(f"Updated monthly budgets for {period_label()}!")
-                st.rerun()
+                too_much = check_budgets_fit(updated_values, plan["monthly_income"], plan["savings_goal"]) if plan else None
+                if too_much:
+                    st.error(f"Not saved. {too_much}")
+                else:
+                    for cat, val in updated_values.items():
+                        upsert_budget(cat, val)
+                    st.success(f"Updated monthly budgets for {period_label()}!")
+                    st.rerun()
 
     st.divider()
 

@@ -104,3 +104,17 @@ def test_chat_can_update_income_and_savings_goal():
     assert result["saved"] is True
     assert get_profile()["monthly_income"] == 25000 and get_profile()["savings_goal"] == 4000
     assert update_my_profile.invoke({"savings_goal": 99999})["saved"] is False  # more than income
+
+
+def test_chat_cannot_budget_more_than_income_minus_savings():
+    from agent.tools_registry import set_budget, update_my_profile
+    from tools.database_tool import get_all_budgets
+
+    _fresh_user_with_profile(income=10000, savings=2000)
+    assert set_budget.invoke({"category": "Food", "amount": 6000})["saved"] is True
+
+    result = set_budget.invoke({"category": "Shopping", "amount": 3000})  # 9,000 > 8,000 allowed
+
+    assert result["saved"] is False and "You can only budget ₹8,000" in result["error"]
+    assert get_all_budgets()["Shopping"] == 0.0
+    assert update_my_profile.invoke({"monthly_income": 7000})["saved"] is False  # 6,000 > 5,000 allowed
