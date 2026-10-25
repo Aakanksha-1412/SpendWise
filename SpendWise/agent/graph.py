@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from agent import memory
 from agent.fallback_agent import run_fallback_agent
-from utils.helpers import DEFAULT_GEMINI_MODEL, get_setting
+from utils.helpers import DEFAULT_GEMINI_MODEL, format_inr, get_setting
 
 # The real agent needs LangChain + LangGraph. If they aren't installed, the app still
 # runs using the fallback agent (see `run_agent`).
@@ -228,15 +228,15 @@ def _answer(user_query: str, uploaded_receipt: Any, chat_history: List[Dict[str,
 
     if failure:
         logger.warning("Agent stopped early: %s", failure)
-        saved_something = any(
-            isinstance(output, dict) and output.get("saved") is True for output in tool_outputs.values()
-        )
-        if not saved_something:
+        saved = [
+            output for output in tool_outputs.values() if isinstance(output, dict) and output.get("saved") is True
+        ]
+        if not saved:
             # Nothing was saved yet, so the fallback can safely handle the whole request.
             return _run_fallback(user_query, uploaded_receipt, reason=failure)
-        # An expense was already saved: re-running the request would save it twice.
+        # Something was already saved: re-running the request would save it twice.
         return {
-            "response": _partial_answer(failure),
+            "response": _partial_answer(failure, saved),
             "mode": "llm_partial",
             "intent": "PLANNED_BY_LLM",
             "selected_tools": selected_tools,
@@ -268,12 +268,22 @@ def _run_fallback(user_query: str, uploaded_receipt: Any, reason: str) -> Dict[s
     return result
 
 
-def _partial_answer(failure: str) -> str:
-    """Explain a run that stopped after saving data, without repeating it."""
+def _partial_answer(failure: str, saved: List[Dict[str, Any]]) -> str:
+    """Explain a run that stopped after saving data, naming exactly what was saved."""
+    what = []
+    for output in saved:
+        if "transaction" in output:
+            tx = output["transaction"]
+            what.append(f"your expense of {format_inr(tx['amount'])} at {tx['merchant']}")
+        elif "budget_status" in output:
+            what.append(f"your new {output['budget_status']['category']} budget")
+        elif "monthly_income" in output:
+            what.append("your new income and savings goal")
+    saved_text = " and ".join(what) or "your change"
     return (
         f"> ⚠️ I started working on this, but {failure}, so I couldn't finish my answer.\n"
-        "> ✅ Your expense **was saved** — please don't add it again. "
-        "Open the trace below or the Transactions page to check it.\n\n"
+        f"> ✅ I already saved {saved_text}, so please don't ask for it again. "
+        "Open the trace below to check it.\n\n"
         "Ask me about your budget again in a minute."
     )
 
