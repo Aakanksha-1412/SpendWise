@@ -19,7 +19,7 @@ from datetime import datetime
 
 from tools.database_tool import get_transactions, add_transaction
 from tools.categorization_tool import categorize_expense, parse_natural_language_expense
-from utils.helpers import CATEGORIES, format_inr
+from utils.helpers import CATEGORIES, format_inr, future_date_error
 
 
 def render_transactions_page() -> None:
@@ -45,7 +45,10 @@ def render_transactions_page() -> None:
                 if st.button("Parse & Add", type="primary", width="stretch"):
                     if nl_input.strip():
                         parsed = parse_natural_language_expense(nl_input)
-                        if parsed["amount"] > 0:
+                        future = future_date_error(parsed["date"])
+                        if future:
+                            st.error(f"**This expense was not saved.** {future}")
+                        elif parsed["amount"] > 0:
                             saved = add_transaction(parsed)
                             st.success(
                                 f"Added: {saved['merchant']} — {format_inr(saved['amount'])} "
@@ -59,7 +62,7 @@ def render_transactions_page() -> None:
             with st.form("manual_expense_form", clear_on_submit=True):
                 f_cols = st.columns(4)
                 with f_cols[0]:
-                    tx_date = st.date_input("Date", value=datetime.now())
+                    tx_date = st.date_input("Date", value=datetime.now(), max_value=datetime.now())  # no future dates
                 with f_cols[1]:
                     merchant = st.text_input("Merchant", placeholder="e.g., Swiggy, Uber, Amazon")
                 with f_cols[2]:

@@ -184,3 +184,19 @@ def test_profile_edit_refuses_income_too_small_for_the_budgets():
 
 def _budget_input(app, category):
     return next(n for n in app.number_input if n.label == f"{category} Budget (₹)")
+
+
+def test_typed_expense_with_a_future_date_is_not_saved():
+    from datetime import date, timedelta
+    from tools.database_tool import get_transactions, remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+    tomorrow = (date.today() + timedelta(days=1)).strftime("%d-%m-%Y")
+
+    app = AppTest.from_file(str(PAGES / "transactions.py"), default_timeout=60).run()
+    app.text_input[0].set_value(f"Spent ₹450 at Swiggy on {tomorrow}")
+    next(b for b in app.button if b.label == "Parse & Add").click().run()
+
+    assert any("This expense was not saved." in e.value for e in app.error)
+    assert get_transactions() == []

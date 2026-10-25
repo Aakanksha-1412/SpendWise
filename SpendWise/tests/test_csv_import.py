@@ -81,3 +81,16 @@ def test_importing_the_same_file_twice_does_not_duplicate():
 
     assert second == {"imported": 0, "duplicates": 15}
     assert len(get_transactions()) == 15
+
+
+def test_future_dated_rows_are_skipped_and_the_rest_still_imports():
+    from datetime import date, timedelta
+
+    tomorrow = (date.today() + timedelta(days=1)).strftime("%d-%m-%Y")
+    today = date.today().strftime("%d-%m-%Y")
+    csv = f"date,merchant,amount\n{today},Swiggy,450\n{tomorrow},Future Store,999\n"
+
+    result = read_transactions_csv(csv.encode("utf-8"))
+
+    assert [row["merchant"] for row in result["rows"]] == ["Swiggy"]
+    assert result["skipped"] == [f"row 3: the date {tomorrow} is in the future"]

@@ -137,3 +137,16 @@ def test_affordability_says_no_when_it_would_cut_into_the_savings_goal():
     assert eats_savings["can_afford"] is False
     assert "would cut into your savings by ₹11,400" in eats_savings["answer"]
     assert fits["can_afford"] is True and fits["remaining_after"] == 420000
+
+
+def test_chat_cannot_add_an_expense_dated_in_the_future():
+    from datetime import date, timedelta
+    from tools.database_tool import get_transactions
+
+    _fresh_user_with_profile(income=20000, savings=2000)
+    tomorrow = (date.today() + timedelta(days=1)).strftime("%d-%m-%Y")
+
+    result = add_expense.invoke({"merchant": "Future Store", "amount": 999, "category": "Shopping", "date": tomorrow})
+
+    assert result["saved"] is False and "is in the future" in result["error"]
+    assert get_transactions() == []

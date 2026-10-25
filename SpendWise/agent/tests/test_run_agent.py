@@ -108,3 +108,17 @@ def test_demo_mode_affordability_keeps_the_savings_goal(no_gemini):
     assert result["mode"] == "fallback"
     assert "No. You only have ₹1,38,600 left to spend this month while keeping your ₹50,000 savings goal." in result["response"]
     assert "more than all the money you have left this month (₹1,88,600)" in result["response"]
+
+
+def test_demo_mode_does_not_add_an_expense_dated_in_the_future(no_gemini):
+    from datetime import date, timedelta
+    from tools.database_tool import get_transactions, remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+    tomorrow = (date.today() + timedelta(days=1)).strftime("%d-%m-%Y")
+
+    result = run_agent(f"add ₹500 at Swiggy on {tomorrow} and tell me my food budget left")
+
+    assert f"The date {tomorrow} is in the future" in result["response"]
+    assert get_transactions() == []

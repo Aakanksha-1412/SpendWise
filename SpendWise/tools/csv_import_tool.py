@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from tools.categorization_tool import categorize_expense
 from tools.database_tool import bulk_insert_transactions, get_transactions
-from utils.helpers import CATEGORIES, normalize_date
+from utils.helpers import CATEGORIES, future_date_error, normalize_date
 
 REQUIRED_COLUMNS = ("date", "merchant", "amount")
 
@@ -95,6 +95,9 @@ def read_transactions_csv(data: bytes) -> Dict[str, Any]:
             datetime.strptime(date, "%d-%m-%Y")
         except ValueError:
             skipped.append(f"row {line}: date '{raw['date']}' not understood (use DD-MM-YYYY)")
+            continue
+        if future_date_error(date):
+            skipped.append(f"row {line}: the date {date} is in the future")
             continue
 
         merchant = str(raw["merchant"]).strip() or "Unknown"

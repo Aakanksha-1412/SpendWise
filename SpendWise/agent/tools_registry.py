@@ -35,7 +35,7 @@ from tools.categorization_tool import categorize_expense
 from tools.database_tool import add_transaction, get_all_budgets, get_profile, get_transactions, save_profile, upsert_budget
 from tools.ocr_tool import extract_receipt
 from tools.spike_detector import detect_all_category_spikes, detect_spending_spike
-from utils.helpers import CATEGORIES, normalize_date, to_iso_date
+from utils.helpers import CATEGORIES, future_date_error, normalize_date, to_iso_date
 
 # ------------------------------------------------------------------------------
 # Receipt hand-off
@@ -237,6 +237,9 @@ def add_expense(
             datetime.strptime(date, "%d-%m-%Y")
         except ValueError:
             return {"error": f"Could not read date '{date}'. Use DD-MM-YYYY (today is in your instructions).", "saved": False}
+        future = future_date_error(date)
+        if future:
+            return {"error": f"This expense was not saved. {future}", "saved": False}
 
     saved = add_transaction(
         {

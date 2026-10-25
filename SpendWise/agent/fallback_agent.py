@@ -26,7 +26,7 @@ from tools.budget_tool import (
 )
 from tools.spike_detector import detect_all_category_spikes
 from analytics.analytics import check_spend_against_savings, get_summary_metrics
-from utils.helpers import CATEGORIES, format_inr, period_label
+from utils.helpers import CATEGORIES, format_inr, future_date_error, period_label
 
 
 # ==============================================================================
@@ -220,7 +220,10 @@ def call_tool_node(state: AgentState) -> AgentState:
                     "description": tx_source.get("description", "Added via SpendWise AI Agent"),
                     "source": tx_source.get("source", "Receipt" if "extracted_receipt" in outputs else "Text"),
                 }
-                if tx_payload["amount"] > 0:
+                future = future_date_error(tx_payload["date"] or "")
+                if future:
+                    outputs["not_saved_reason"] = f"This expense was not saved. {future}"
+                elif tx_payload["amount"] > 0:
                     saved_tx = add_transaction(tx_payload)
                     outputs["saved_transaction"] = saved_tx
                     target_cat = saved_tx["category"]
@@ -353,6 +356,8 @@ def generate_response_node(state: AgentState) -> AgentState:
                 f"- **Total Spent:** {format_inr(b_stat.get('spent', 0))} ({b_stat.get('utilization_pct', 0)}%)\n"
                 f"- **Remaining Budget:** **{format_inr(b_stat.get('remaining', 0))}** (`{b_stat.get('status', 'OK')}`)"
             )
+        elif outputs.get("not_saved_reason"):
+            response = f"**{outputs['not_saved_reason']}**"
         elif outputs.get("receipt_unreadable"):
             response = (
                 "I couldn't read that receipt photo. Please type the merchant and amount "
