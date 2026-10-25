@@ -21,7 +21,7 @@ from tools.ocr_tool import extract_receipt
 from tools.categorization_tool import merchant_memory_version
 from tools.csv_import_tool import import_rows, read_transactions_csv
 from tools.database_tool import add_transaction
-from utils.helpers import CATEGORIES, format_inr, future_date_error, is_in_current_month
+from utils.helpers import CATEGORIES, expense_date_error, format_inr, is_in_current_month
 
 
 @st.cache_data(show_spinner="Reading and categorizing transactions...")
@@ -136,9 +136,9 @@ def render_upload_page() -> None:
                     desc_val = st.text_input("Extracted Items", value=ocr_data["description"])
 
                 if st.form_submit_button("Save Extracted Receipt to SQLite", type="primary"):
-                    future = future_date_error(date_val)
-                    if future:
-                        st.error(f"**This expense was not saved.** {future}")
+                    date_problem = expense_date_error(date_val)
+                    if date_problem:
+                        st.error(f"**This expense was not saved.** {date_problem}")
                         st.stop()
                     saved = add_transaction(
                         {

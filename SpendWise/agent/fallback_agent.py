@@ -26,7 +26,7 @@ from tools.budget_tool import (
 )
 from tools.spike_detector import detect_all_category_spikes
 from analytics.analytics import check_spend_against_savings, get_summary_metrics
-from utils.helpers import CATEGORIES, format_inr, future_date_error, period_label
+from utils.helpers import CATEGORIES, expense_date_error, format_inr, period_label
 
 
 # ==============================================================================
@@ -220,9 +220,9 @@ def call_tool_node(state: AgentState) -> AgentState:
                     "description": tx_source.get("description", "Added via SpendWise AI Agent"),
                     "source": tx_source.get("source", "Receipt" if "extracted_receipt" in outputs else "Text"),
                 }
-                future = future_date_error(tx_payload["date"] or "")
-                if future:
-                    outputs["not_saved_reason"] = f"This expense was not saved. {future}"
+                date_problem = expense_date_error(tx_payload["date"] or "")
+                if date_problem:
+                    outputs["not_saved_reason"] = f"This expense was not saved. {date_problem}"
                 elif tx_payload["amount"] > 0:
                     saved_tx = add_transaction(tx_payload)
                     outputs["saved_transaction"] = saved_tx

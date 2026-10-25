@@ -68,11 +68,19 @@ def test_amounts_use_indian_digit_grouping():
 
 def test_only_today_or_earlier_is_a_valid_expense_date():
     from datetime import date, timedelta
-    from utils.helpers import future_date_error
+    from utils.helpers import expense_date_error
 
     tomorrow = (date.today() + timedelta(days=1)).strftime("%d-%m-%Y")
 
-    assert future_date_error(date.today().strftime("%d-%m-%Y")) is None
-    assert future_date_error("01-01-2020") is None
-    assert future_date_error("") is None  # empty means today
-    assert future_date_error(tomorrow) == f"The date {tomorrow} is in the future. Please use today's date or an earlier one."
+    assert expense_date_error(date.today().strftime("%d-%m-%Y")) is None
+    assert expense_date_error("01-01-2020") is None
+    assert expense_date_error("") is None  # empty means today
+    assert expense_date_error(tomorrow) == f"The date {tomorrow} is in the future. Please use today's date or an earlier one."
+
+
+def test_impossible_dates_are_not_valid_expense_dates():
+    from utils.helpers import expense_date_error
+
+    assert expense_date_error("31-02-2026").startswith('"31-02-2026" is not a real date. Please write the date as DD-MM-YYYY')
+    assert "is not a real date" in expense_date_error("10-13-2026")  # month written first
+    assert "is not a real date" in expense_date_error("hello")

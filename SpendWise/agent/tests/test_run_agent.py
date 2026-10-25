@@ -122,3 +122,15 @@ def test_demo_mode_does_not_add_an_expense_dated_in_the_future(no_gemini):
 
     assert f"The date {tomorrow} is in the future" in result["response"]
     assert get_transactions() == []
+
+
+def test_demo_mode_does_not_add_an_expense_with_an_impossible_date(no_gemini):
+    from tools.database_tool import get_transactions, remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+
+    result = run_agent("add ₹450 at Swiggy on 10-13-2026 and tell me my food budget left")
+
+    assert '"10-13-2026" is not a real date' in result["response"]
+    assert get_transactions() == []

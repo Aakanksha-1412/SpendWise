@@ -200,3 +200,17 @@ def test_typed_expense_with_a_future_date_is_not_saved():
 
     assert any("This expense was not saved." in e.value for e in app.error)
     assert get_transactions() == []
+
+
+def test_typed_expense_with_an_impossible_date_is_not_saved():
+    from tools.database_tool import get_transactions, remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+
+    app = AppTest.from_file(str(PAGES / "transactions.py"), default_timeout=60).run()
+    app.text_input[0].set_value("Spent ₹500 at Swiggy on 31-02-2026")
+    next(b for b in app.button if b.label == "Parse & Add").click().run()
+
+    assert any('"31-02-2026" is not a real date' in e.value for e in app.error)
+    assert get_transactions() == []

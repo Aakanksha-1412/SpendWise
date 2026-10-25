@@ -169,16 +169,17 @@ def _env_file_values(path: str, modified_time: float) -> Dict[str, Optional[str]
     return dotenv_values(path) if modified_time else {}
 
 
-def future_date_error(date_str: str) -> Optional[str]:
+def expense_date_error(date_str: str) -> Optional[str]:
     """
-    Expenses can only be dated today or earlier. Returns the message to show when
-    `date_str` (any common format) is after today, otherwise None.
+    An expense date must be a real calendar date, today or earlier (empty = today).
+    Returns the message to show when it isn't, otherwise None.
     """
     normalized = normalize_date(date_str or "")
     try:
         parsed = datetime.strptime(normalized, "%d-%m-%Y").date()
     except ValueError:
-        return None  # not a readable date: other checks deal with that
+        example = datetime.now().strftime("%d-%m-%Y")
+        return f'"{(date_str or "").strip()}" is not a real date. Please write the date as DD-MM-YYYY, for example {example}.'
     if parsed > datetime.now().date():
         return f"The date {normalized} is in the future. Please use today's date or an earlier one."
     return None
