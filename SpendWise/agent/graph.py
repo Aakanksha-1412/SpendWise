@@ -188,7 +188,7 @@ def _answer(user_query: str, uploaded_receipt: Any, chat_history: List[Dict[str,
     if not AGENT_LIBRARIES_AVAILABLE:
         return _run_fallback(user_query, uploaded_receipt, reason=f"agent libraries are not installed ({_IMPORT_ERROR.name})")
     if _get_llm_with_tools() is None:
-        return _run_fallback(user_query, uploaded_receipt, reason="GEMINI_API_KEY is not set in SpendWise/.env")
+        return _run_fallback(user_query, uploaded_receipt, reason="GEMINI_API_KEY is not set (laptop: SpendWise/.env · online: the app's Settings → Secrets)")
 
     question = user_query
     if uploaded_receipt is not None:

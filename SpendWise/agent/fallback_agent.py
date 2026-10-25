@@ -69,7 +69,8 @@ def understand_request_node(state: AgentState) -> AgentState:
 
     if is_confirmation:
         intent = "NEEDS_DETAILS"
-    elif "afford" in q_lower or "can i spend" in q_lower:
+    elif "afford" in q_lower or (re.search(r"\b(can|could|should) i\b", q_lower) and real_amount):
+        # "can I afford ₹500?", "can i eat icecream of 500", "should I buy shoes for 2000?"
         intent = "AFFORDABILITY_CHECK"
     elif (has_receipt or (add_verb and real_amount)) and not hypothetical:
         intent = "ADD_EXPENSE_AND_CHECK_BUDGET" if wants_budget or has_receipt else "ADD_EXPENSE"
