@@ -107,7 +107,7 @@ def test_budget_page_warns_when_budgets_are_more_than_income_minus_savings():
 
     app = AppTest.from_file(str(PAGES / "budget.py"), default_timeout=60).run()
 
-    assert any("Please lower them by ₹2,000" in w.value for w in app.warning)
+    assert any("Please reduce them by ₹2,000" in w.value for w in app.warning)
 
 
 def test_budget_page_refuses_budgets_more_than_income_minus_savings():
@@ -121,7 +121,7 @@ def test_budget_page_refuses_budgets_more_than_income_minus_savings():
     _budget_input(app, "Shopping").set_value(4000.0)  # 9,000 > 7,000 allowed
     next(b for b in app.button if b.label == "Save Monthly Budgets").click().run()
 
-    assert any("You can only budget ₹7,000" in e.value for e in app.error)
+    assert any("you can only plan ₹7,000" in e.value for e in app.error)
     assert sum(get_all_budgets().values()) == 0  # nothing saved
 
 
@@ -149,7 +149,7 @@ def test_first_setup_refuses_budgets_more_than_income():
     app.number_input(key="setup_budget_Education").set_value(450000.0)
     next(b for b in app.button if b.label == "Save & create my budgets").click().run()
 
-    assert any("Please lower them by ₹300,000" in e.value for e in app.error)
+    assert any("Please reduce them by ₹300,000" in e.value for e in app.error)
     assert get_profile() is None  # nothing saved
 
 
@@ -164,7 +164,7 @@ def test_profile_edit_refuses_income_too_small_for_the_budgets():
     app.number_input(key="profile_income").set_value(10000.0)
     next(b for b in app.button if b.label == "Save").click().run()
 
-    assert any("You can only budget ₹8,000" in e.value for e in app.error)
+    assert any("you can only plan ₹8,000" in e.value for e in app.error)
     assert get_profile()["monthly_income"] == 20000.0  # unchanged
 
 

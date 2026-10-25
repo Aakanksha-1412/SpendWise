@@ -199,6 +199,24 @@ def get_money_plan(month: Optional[int] = None, year: Optional[int] = None) -> O
     savings_goal = profile["savings_goal"]
     spent = round(sum(s["spent"] for s in statuses), 2)
     budget_total = round(sum(s["budget"] for s in statuses), 2)
+    budget_left = round(sum(max(s["remaining"], 0.0) for s in statuses if s["budget"] > 0), 2)
+
+    # How the income is split (the donut): the parts always add up to exactly the income.
+    # Spending first, then the savings goal; unspent budgets can only use what is left.
+    left = income
+    split_spent = min(spent, left)
+    left -= split_spent
+    split_savings = min(savings_goal, left)
+    left -= split_savings
+    split_budget_left = min(budget_left, left)
+    left -= split_budget_left
+    income_split = {
+        "Spent so far": round(split_spent, 2),
+        "Budget left": round(split_budget_left, 2),
+        "Savings goal": round(split_savings, 2),
+        "Not planned yet": round(left, 2),
+    }
+
     return {
         "monthly_income": income,
         "savings_goal": savings_goal,
@@ -206,8 +224,9 @@ def get_money_plan(month: Optional[int] = None, year: Optional[int] = None) -> O
         "budget_total": budget_total,
         "available_to_spend": round(income - savings_goal, 2),  # income - savings goal
         "budgets_over_available": round(max(budget_total - (income - savings_goal), 0.0), 2),
-        "budget_left": round(sum(max(s["remaining"], 0.0) for s in statuses if s["budget"] > 0), 2),
+        "budget_left": budget_left,
         "can_still_spend": round(income - savings_goal - spent, 2),
         "unplanned": round(max(income - savings_goal - budget_total, 0.0), 2),
+        "income_split": income_split,  # adds up to monthly_income
         "categories": [{**s, "label": STATUS_LABELS[s["status"]]} for s in statuses],
     }

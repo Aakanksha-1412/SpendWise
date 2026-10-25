@@ -115,6 +115,6 @@ def test_chat_cannot_budget_more_than_income_minus_savings():
 
     result = set_budget.invoke({"category": "Shopping", "amount": 3000})  # 9,000 > 8,000 allowed
 
-    assert result["saved"] is False and "You can only budget ₹8,000" in result["error"]
+    assert result["saved"] is False and "you can only plan ₹8,000" in result["error"]
     assert get_all_budgets()["Shopping"] == 0.0
     assert update_my_profile.invoke({"monthly_income": 7000})["saved"] is False  # 6,000 > 5,000 allowed

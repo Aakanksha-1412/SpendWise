@@ -273,7 +273,7 @@ def set_budget(category: str, amount: float) -> Dict[str, Any]:
     if profile:
         too_much = check_budgets_fit({**get_all_budgets(), official: amount}, profile["monthly_income"], profile["savings_goal"])
         if too_much:
-            return {"error": f"Not saved. {too_much}", "saved": False}
+            return {"error": f"This budget was not saved. {too_much}", "saved": False}
     upsert_budget(official, amount)
     return {"saved": True, "budget_status": calculate_budget_status(official)}
 
@@ -292,7 +292,7 @@ def update_my_profile(monthly_income: Optional[float] = None, savings_goal: Opti
         return {"error": "The savings goal must be between 0 and the monthly income.", "saved": False}
     too_much = check_budgets_fit(get_all_budgets(), income, goal)
     if too_much:
-        return {"error": f"Not saved. {too_much} Ask the user to lower their budgets first.", "saved": False}
+        return {"error": f"This change was not saved. {too_much} Ask the user to reduce their budgets first.", "saved": False}
     save_profile(income, goal, profile["usual_spending"] if profile else {})
     return {"saved": True, "monthly_income": income, "savings_goal": goal, "savings_now": _savings_check()}
 

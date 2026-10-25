@@ -133,9 +133,9 @@ def check_budgets_fit(budgets: Dict[str, float], monthly_income: float, savings_
     if total <= allowed:
         return None
     return (
-        f"Your budgets total {format_inr(total)}. You can only budget {format_inr(allowed)} "
-        f"({format_inr(monthly_income)} income minus {format_inr(savings_goal)} savings). "
-        f"Please lower them by {format_inr(total - allowed)}."
+        f"Your budgets add up to {format_inr(total)}, but you can only plan {format_inr(allowed)}: "
+        f"your {format_inr(monthly_income)} income minus your {format_inr(savings_goal)} savings goal. "
+        f"Please reduce them by {format_inr(total - allowed)}."
     )
 
 

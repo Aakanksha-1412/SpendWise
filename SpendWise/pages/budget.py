@@ -58,11 +58,11 @@ def render_budget_page() -> None:
                         step=500.0,
                     )
             if plan:
-                st.caption(f"All budgets together can be at most {format_inr(plan['available_to_spend'])}.")
+                st.caption(f"All your budgets together can be at most {format_inr(plan['available_to_spend'])}.")
             if st.form_submit_button("Save Monthly Budgets", type="primary"):
                 too_much = check_budgets_fit(updated_values, plan["monthly_income"], plan["savings_goal"]) if plan else None
                 if too_much:
-                    st.error(f"Not saved. {too_much}")
+                    st.error(f"**These budgets were not saved.** {too_much}")
                 else:
                     for cat, val in updated_values.items():
                         upsert_budget(cat, val)
