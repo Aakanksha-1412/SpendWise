@@ -123,15 +123,27 @@ def suggest_discretionary_reallocation(month: Optional[int] = None, year: Option
     }
 
 
-def check_budgets_fit(budgets: Dict[str, float], monthly_income: float, savings_goal: float) -> Optional[str]:
+def check_budgets_fit(
+    budgets: Dict[str, float], monthly_income: float, savings_goal: float, changed: Optional[str] = None
+) -> Optional[str]:
     """
     All budgets together may not be more than income - savings goal (no budgeting money
     the user doesn't have). Returns None when they fit, otherwise the message to show.
+    `changed`: the one category being changed (e.g. by the assistant) — the message then
+    says what the total WOULD be and the most that category can be set to.
     """
     allowed = round(float(monthly_income) - float(savings_goal), 2)
     total = round(sum(float(amount or 0.0) for amount in budgets.values()), 2)
     if total <= allowed:
         return None
+    if changed:
+        amount = float(budgets.get(changed) or 0.0)
+        most = max(allowed - (total - amount), 0.0)
+        return (
+            f"With {changed} set to {format_inr(amount)}, your budgets would add up to {format_inr(total)}, "
+            f"but you can only plan {format_inr(allowed)}: your {format_inr(monthly_income)} income minus your "
+            f"{format_inr(savings_goal)} savings goal. The most you can set {changed} to is {format_inr(most)}."
+        )
     return (
         f"Your budgets add up to {format_inr(total)}, but you can only plan {format_inr(allowed)}: "
         f"your {format_inr(monthly_income)} income minus your {format_inr(savings_goal)} savings goal. "
