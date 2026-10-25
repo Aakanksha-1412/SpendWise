@@ -214,3 +214,17 @@ def test_typed_expense_with_an_impossible_date_is_not_saved():
 
     assert any('"31-02-2026" is not a real date' in e.value for e in app.error)
     assert get_transactions() == []
+
+
+def test_typed_refund_is_not_saved_as_an_expense():
+    from tools.database_tool import get_transactions, remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+
+    app = AppTest.from_file(str(PAGES / "transactions.py"), default_timeout=60).run()
+    app.text_input[0].set_value("Got refund of 500 from Amazon")
+    next(b for b in app.button if b.label == "Parse & Add").click().run()
+
+    assert any("This looks like money you received" in w.value for w in app.warning)
+    assert get_transactions() == []

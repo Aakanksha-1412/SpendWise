@@ -17,7 +17,7 @@ from typing import Dict, Any, List
 
 from agent.state import AgentState
 from tools.ocr_tool import extract_receipt
-from tools.categorization_tool import parse_natural_language_expense, categorize_expense
+from tools.categorization_tool import INCOME_NOT_SAVED, parse_natural_language_expense, categorize_expense
 from tools.database_tool import add_transaction, get_transactions
 from tools.budget_tool import (
     calculate_budget_status,
@@ -198,7 +198,7 @@ def call_tool_node(state: AgentState) -> AgentState:
                 outputs["receipt_unreadable"] = True  # save nothing; the reply explains
                 continue
             # If user mentioned a specific amount in the prompt, override demo amount
-            amt_match = re.search(r"(?:₹|rs\.?|inr\s*)\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)", query, re.IGNORECASE)
+            amt_match = re.search(r"(?:₹|rs\.?|inr\s*)\s*(\d+(?:,\d{2,3})*(?:\.\d{1,2})?)", query, re.IGNORECASE)
             if amt_match:
                 receipt_data["total"] = float(amt_match.group(1).replace(",", ""))
             outputs["extracted_receipt"] = receipt_data
@@ -221,7 +221,9 @@ def call_tool_node(state: AgentState) -> AgentState:
                     "source": tx_source.get("source", "Receipt" if "extracted_receipt" in outputs else "Text"),
                 }
                 date_problem = expense_date_error(tx_payload["date"] or "")
-                if date_problem:
+                if tx_source.get("looks_like_income"):
+                    outputs["not_saved_reason"] = INCOME_NOT_SAVED
+                elif date_problem:
                     outputs["not_saved_reason"] = f"This expense was not saved. {date_problem}"
                 elif tx_payload["amount"] > 0:
                     saved_tx = add_transaction(tx_payload)

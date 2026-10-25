@@ -18,7 +18,7 @@ import pandas as pd
 from datetime import datetime
 
 from tools.database_tool import get_transactions, add_transaction
-from tools.categorization_tool import categorize_expense, parse_natural_language_expense
+from tools.categorization_tool import INCOME_NOT_SAVED, categorize_expense, parse_natural_language_expense
 from utils.helpers import CATEGORIES, expense_date_error, format_inr
 
 
@@ -46,7 +46,9 @@ def render_transactions_page() -> None:
                     if nl_input.strip():
                         parsed = parse_natural_language_expense(nl_input)
                         date_problem = expense_date_error(parsed["date"])
-                        if date_problem:
+                        if parsed["looks_like_income"]:
+                            st.warning(INCOME_NOT_SAVED)
+                        elif date_problem:
                             st.error(f"**This expense was not saved.** {date_problem}")
                         elif parsed["amount"] > 0:
                             saved = add_transaction(parsed)
@@ -56,7 +58,7 @@ def render_transactions_page() -> None:
                             )
                             st.rerun()
                         else:
-                            st.warning("Could not detect an expense amount. Please include a number (e.g., ₹450).")
+                            st.warning("I couldn't find an amount. Please include it, for example ₹450.")
 
         with tab_form:
             with st.form("manual_expense_form", clear_on_submit=True):
