@@ -25,7 +25,7 @@ from tools.budget_tool import (
     suggest_discretionary_reallocation,
 )
 from tools.spike_detector import detect_all_category_spikes
-from analytics.analytics import get_summary_metrics
+from analytics.analytics import check_spend_against_savings, get_summary_metrics
 from utils.helpers import CATEGORIES, format_inr, period_label
 
 
@@ -291,7 +291,7 @@ def evaluate_result_node(state: AgentState) -> AgentState:
     if intent == "AFFORDABILITY_CHECK" and "category_budget_status" in outputs:
         b_stat = outputs["category_budget_status"]
         # Prefer a number marked as money ("₹500", "rs 500", "500 rupees") over any other number ("2 pizzas")
-        number = r"(\d+(?:,\d{3})*(?:\.\d{1,2})?)"
+        number = r"(\d+(?:,\d{2,3})*(?:\.\d{1,2})?)"  # 2,00,000 (Indian) and 200,000 both work
         amt_match = (
             re.search(r"(?:₹|\brs\.?|\binr)\s*" + number, query, re.IGNORECASE)
             or re.search(number + r"\s*(?:rs\b|rupees\b|inr\b|/-)", query, re.IGNORECASE)
@@ -299,15 +299,17 @@ def evaluate_result_node(state: AgentState) -> AgentState:
         )
         proposed_amt = float(amt_match.group(1).replace(",", "")) if amt_match else 500.0
         post_remaining = round(b_stat["remaining"] - proposed_amt, 2)
-        can_afford = post_remaining >= 0
+        savings = check_spend_against_savings(proposed_amt)
+        can_afford = post_remaining >= 0 and (savings is None or savings["fits"])
         outputs["affordability_eval"] = {
             "proposed_amount": proposed_amt,
             "can_afford": can_afford,
             "remaining_after_expense": post_remaining,
+            "savings_message": savings["message"] if savings else None,
         }
         notes.append(
             f"Affordability evaluation for {format_inr(proposed_amt)} in {b_stat['category']}: "
-            f"`{'FEASIBLE' if can_afford else 'EXCEEDS BUDGET'}` (Projected remaining: {format_inr(post_remaining)})."
+            f"`{'FEASIBLE' if can_afford else 'EXCEEDS BUDGET OR SAVINGS GOAL'}` (Projected remaining: {format_inr(post_remaining)})."
         )
 
     trace.append(
@@ -386,7 +388,9 @@ def generate_response_node(state: AgentState) -> AgentState:
         rem_after = eval_data.get("remaining_after_expense", 0.0)
         can_afford = eval_data.get("can_afford", True)
 
-        if can_afford:
+        if eval_data.get("savings_message"):
+            response = f"**{eval_data['savings_message']}**"
+        elif can_afford:
             response = (
                 f"**Yes — You can afford a {format_inr(proposed)} expense in {b_stat.get('category', 'Food')}.**\n\n"
                 f"- **Current Remaining {b_stat.get('category')} Budget:** {format_inr(b_stat.get('remaining', 0))}\n"

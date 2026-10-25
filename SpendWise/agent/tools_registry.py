@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.tools import tool
 
-from analytics.analytics import get_summary_metrics
+from analytics.analytics import check_spend_against_savings, get_summary_metrics
 from tools.budget_tool import (
     calculate_budget_status,
     check_budgets_fit,
@@ -154,8 +154,9 @@ def search_transactions(
 @tool
 def check_affordability(category: str, amount: float) -> Dict[str, Any]:
     """Check whether a NEW planned expense of `amount` rupees in `category` fits within
-    the remaining budget. Returns the current remaining budget and what would be left after.
-    Use for "can I afford ₹500 on food?" or "is 500 rs on pizza ok?"."""
+    the remaining budget AND still keeps the user's monthly savings goal. Returns the current
+    remaining budget and what would be left after. If the result has `answer`, tell the user
+    that answer. Use for "can I afford ₹500 on food?" or "is 500 rs on pizza ok?"."""
     official, error = _match_category(category)
     if error:
         return error
@@ -164,6 +165,19 @@ def check_affordability(category: str, amount: float) -> Dict[str, Any]:
     # Simple deterministic maths so the LLM never has to calculate.
     # (Could move into tools/budget_tool.py later — ask Member 3.)
     status = calculate_budget_status(official)
+    # The savings goal comes first: a category budget can't make spending affordable
+    # if it would cut into the savings goal.
+    savings = check_spend_against_savings(amount)
+    if savings and not savings["fits"]:
+        return {
+            "category": status["category"],
+            "planned_amount": amount,
+            "can_afford": False,
+            "savings_goal_at_risk": True,
+            "left_to_spend_this_month": savings["left_to_spend"],
+            "savings_goal": savings["savings_goal"],
+            "answer": savings["message"],
+        }
     if status["status"] == "NO BUDGET SET":
         return {
             "category": status["category"],

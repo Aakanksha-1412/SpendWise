@@ -27,7 +27,7 @@ except ImportError:
 from tools.database_tool import get_profile, get_transactions_df
 from tools.budget_tool import get_all_budget_statuses, suggest_discretionary_reallocation
 from tools.spike_detector import detect_all_category_spikes
-from utils.helpers import CATEGORIES, resolve_period
+from utils.helpers import CATEGORIES, format_inr, resolve_period
 
 
 def get_summary_metrics(month: Optional[int] = None, year: Optional[int] = None) -> Dict[str, Any]:
@@ -181,6 +181,32 @@ def get_dashboard_ai_insights(month: Optional[int] = None, year: Optional[int] =
         "unused_discretionary": reallocation["unused_discretionary_categories"],
         "spending_spikes": spikes,
     }
+
+
+def check_spend_against_savings(amount: float) -> Optional[Dict[str, Any]]:
+    """
+    Would spending `amount` more this month still keep the savings goal?
+    None without a profile. `fits` is False (with a plain-English `message`) when it
+    would cut into the savings goal.
+    """
+    plan = get_money_plan()
+    if plan is None:
+        return None
+    left_to_spend = max(plan["can_still_spend"], 0.0)  # income - savings goal - spent
+    money_left = max(round(plan["monthly_income"] - plan["spent"], 2), 0.0)  # income - spent
+    result = {"left_to_spend": left_to_spend, "savings_goal": plan["savings_goal"], "fits": amount <= left_to_spend, "message": None}
+    if result["fits"]:
+        return result
+    message = (
+        f"No. You only have {format_inr(left_to_spend)} left to spend this month while keeping your "
+        f"{format_inr(plan['savings_goal'])} savings goal. "
+    )
+    if amount > money_left:
+        message += f"{format_inr(amount)} is more than all the money you have left this month ({format_inr(money_left)})."
+    else:
+        message += f"Spending {format_inr(amount)} would cut into your savings by {format_inr(amount - left_to_spend)}."
+    result["message"] = message
+    return result
 
 
 STATUS_LABELS = {

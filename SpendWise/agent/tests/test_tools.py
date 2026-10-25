@@ -118,3 +118,22 @@ def test_chat_cannot_budget_more_than_income_minus_savings():
     assert result["saved"] is False and "you can only plan ₹8,000" in result["error"]
     assert get_all_budgets()["Shopping"] == 0.0
     assert update_my_profile.invoke({"monthly_income": 7000})["saved"] is False  # 6,000 > 5,000 allowed
+
+
+def test_affordability_says_no_when_it_would_cut_into_the_savings_goal():
+    from agent.tools_registry import check_affordability
+    from tools.database_tool import upsert_budget
+
+    _fresh_user_with_profile(income=200000, savings=50000)
+    upsert_budget("Education", 450000)  # saved before budgets were limited to the income
+    add_expense.invoke({"merchant": "Swiggy", "amount": 11400, "category": "Food"})
+
+    too_much = check_affordability.invoke({"category": "Education", "amount": 200000})
+    eats_savings = check_affordability.invoke({"category": "Education", "amount": 150000})
+    fits = check_affordability.invoke({"category": "Education", "amount": 30000})
+
+    assert too_much["can_afford"] is False and too_much["savings_goal_at_risk"] is True
+    assert "₹2,00,000 is more than all the money you have left this month (₹1,88,600)" in too_much["answer"]
+    assert eats_savings["can_afford"] is False
+    assert "would cut into your savings by ₹11,400" in eats_savings["answer"]
+    assert fits["can_afford"] is True and fits["remaining_after"] == 420000

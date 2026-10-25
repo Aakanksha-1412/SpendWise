@@ -89,3 +89,22 @@ def test_demo_mode_says_when_a_receipt_photo_could_not_be_read(no_gemini, monkey
 
     assert result["mode"] == "fallback"
     assert "couldn't read" in result["response"]
+
+
+def _user_with_budget_saved_above_income():
+    from tools.database_tool import add_transaction, remove_all_data, save_profile, upsert_budget
+
+    save_profile(200000, 50000, {})
+    remove_all_data()
+    upsert_budget("Education", 450000)  # saved before budgets were limited to the income
+    add_transaction({"merchant": "Swiggy", "amount": 11400, "category": "Food", "date": ""})
+
+
+def test_demo_mode_affordability_keeps_the_savings_goal(no_gemini):
+    _user_with_budget_saved_above_income()
+
+    result = run_agent("can I afford ₹2,00,000 on education?")
+
+    assert result["mode"] == "fallback"
+    assert "No. You only have ₹1,38,600 left to spend this month while keeping your ₹50,000 savings goal." in result["response"]
+    assert "more than all the money you have left this month (₹1,88,600)" in result["response"]
