@@ -108,3 +108,59 @@ def test_budget_page_warns_when_budgets_are_more_than_income_minus_savings():
     app = AppTest.from_file(str(PAGES / "budget.py"), default_timeout=60).run()
 
     assert any("₹2,000 more" in w.value for w in app.warning)
+
+
+def test_budget_page_refuses_budgets_more_than_income_minus_savings():
+    from tools.database_tool import get_all_budgets, remove_all_data, save_profile
+
+    save_profile(10000, 3000, {})
+    remove_all_data()
+
+    app = AppTest.from_file(str(PAGES / "budget.py"), default_timeout=60).run()
+    app.number_input[0].set_value(5000.0)  # Food
+    app.number_input[2].set_value(4000.0)  # Shopping: 9,000 > 7,000
+    next(b for b in app.button if b.label == "Save Monthly Budgets").click().run()
+
+    assert any("Not possible" in e.value for e in app.error)
+    assert sum(get_all_budgets().values()) == 0  # nothing saved
+
+
+def test_first_setup_refuses_budgets_more_than_income():
+    from tools.database_tool import get_profile
+
+    app = AppTest.from_file(str(PAGES / "profile.py"), default_timeout=60).run()
+    app.number_input(key="profile_income").set_value(200000.0)
+    app.number_input(key="profile_savings").set_value(50000.0)
+    app.number_input(key="setup_budget_Education").set_value(450000.0)
+    next(b for b in app.button if b.label == "Save & create my budgets").click().run()
+
+    assert any("Not possible" in e.value for e in app.error)
+    assert get_profile() is None  # nothing saved
+
+
+def test_profile_edit_refuses_income_too_small_for_the_budgets():
+    from tools.database_tool import get_profile, remove_all_data, save_profile, upsert_budget
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+    upsert_budget("Food", 15000)
+
+    app = AppTest.from_file(str(PAGES / "profile.py"), default_timeout=60).run()
+    app.number_input(key="profile_income").set_value(10000.0)
+    next(b for b in app.button if b.label == "Save").click().run()
+
+    assert any("Not possible" in e.value for e in app.error)
+    assert get_profile()["monthly_income"] == 20000.0
+
+
+def test_pages_warn_when_spending_is_more_than_income():
+    from tools.database_tool import add_transaction, remove_all_data, save_profile
+
+    save_profile(10000, 2000, {})
+    remove_all_data()
+    add_transaction({"merchant": "Croma", "amount": 12000, "category": "Shopping", "date": ""})
+
+    for page in ["home", "analytics", "profile", "transactions"]:
+        app = AppTest.from_file(str(PAGES / f"{page}.py"), default_timeout=60).run()
+        assert not app.exception
+        assert any("₹2,000 more than your whole income" in e.value for e in app.error), page

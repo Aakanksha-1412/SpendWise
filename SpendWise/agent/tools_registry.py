@@ -27,11 +27,12 @@ from langchain_core.tools import tool
 from analytics.analytics import get_summary_metrics
 from tools.budget_tool import (
     calculate_budget_status,
+    check_budgets_fit,
     get_all_budget_statuses,
     suggest_discretionary_reallocation,
 )
 from tools.categorization_tool import categorize_expense
-from tools.database_tool import add_transaction, get_profile, get_transactions, save_profile, upsert_budget
+from tools.database_tool import add_transaction, get_all_budgets, get_profile, get_transactions, save_profile, upsert_budget
 from tools.ocr_tool import extract_receipt
 from tools.spike_detector import detect_all_category_spikes, detect_spending_spike
 from utils.helpers import CATEGORIES, normalize_date, to_iso_date
@@ -256,6 +257,7 @@ def _savings_check() -> Optional[Dict[str, Any]]:
         "left_after_spending": summary["saved_so_far"],
         "below_savings_goal_by": below_by,
         "savings_goal_at_risk": below_by > 0,
+        "spent_more_than_income": summary["total_spent"] > summary["monthly_income"],
     }
 
 
@@ -268,6 +270,11 @@ def set_budget(category: str, amount: float) -> Dict[str, Any]:
         return {**error, "saved": False}
     if amount < 0:
         return {"error": "A budget can't be negative.", "saved": False}
+    profile = get_profile()
+    if profile:
+        too_much = check_budgets_fit({**get_all_budgets(), official: amount}, profile["monthly_income"], profile["savings_goal"])
+        if too_much:
+            return {"error": too_much, "saved": False}
     upsert_budget(official, amount)
     return {"saved": True, "budget_status": calculate_budget_status(official)}
 
@@ -284,6 +291,9 @@ def update_my_profile(monthly_income: Optional[float] = None, savings_goal: Opti
         return {"error": "Ask the user for their monthly income (more than 0).", "saved": False}
     if goal < 0 or goal > income:
         return {"error": "The savings goal must be between 0 and the monthly income.", "saved": False}
+    too_much = check_budgets_fit(get_all_budgets(), income, goal)
+    if too_much:
+        return {"error": too_much + " Ask the user to lower their budgets first.", "saved": False}
     save_profile(income, goal, profile["usual_spending"] if profile else {})
     return {"saved": True, "monthly_income": income, "savings_goal": goal, "savings_now": _savings_check()}
 

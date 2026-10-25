@@ -27,7 +27,7 @@ except ImportError:
 from tools.database_tool import get_profile, get_transactions_df
 from tools.budget_tool import get_all_budget_statuses, suggest_discretionary_reallocation
 from tools.spike_detector import detect_all_category_spikes
-from utils.helpers import CATEGORIES, resolve_period
+from utils.helpers import CATEGORIES, format_inr, resolve_period
 
 
 def get_summary_metrics(month: Optional[int] = None, year: Optional[int] = None) -> Dict[str, Any]:
@@ -177,6 +177,36 @@ def get_dashboard_ai_insights(month: Optional[int] = None, year: Optional[int] =
     }
 
 
+def get_income_alerts(month: Optional[int] = None, year: Optional[int] = None) -> list:
+    """
+    Problems with this month's numbers compared to the user's income, worst first, as
+    (level, message) pairs with level "error" or "warning". Empty without a profile.
+    """
+    plan = get_money_plan(month=month, year=year)
+    if plan is None:
+        return []
+    alerts = []
+    income, spent = plan["monthly_income"], plan["spent"]
+    if spent > income:
+        alerts.append(("error", (
+            f"🚨 You've spent {format_inr(spent)} this month — {format_inr(spent - income)} more than "
+            f"your whole income of {format_inr(income)}. This can only be paid from savings or borrowing."
+        )))
+    elif plan["can_still_spend"] < 0:
+        alerts.append(("warning", (
+            f"⚠️ You've spent {format_inr(-plan['can_still_spend'])} more than income minus savings — "
+            f"this is coming out of your {format_inr(plan['savings_goal'])} savings goal."
+        )))
+    if plan["budgets_over_available"] > 0:
+        alerts.append(("warning", (
+            f"⚠️ Your budgets add up to {format_inr(plan['budget_total'])} — "
+            f"{format_inr(plan['budgets_over_available'])} more than you can spend "
+            f"(income {format_inr(income)} − savings goal {format_inr(plan['savings_goal'])}). "
+            "Lower them on the 🎯 Budget page."
+        )))
+    return alerts
+
+
 STATUS_LABELS = {
     "UNDER BUDGET": "✅ fine",
     "NEAR LIMIT": "⚠️ almost full",
@@ -199,6 +229,25 @@ def get_money_plan(month: Optional[int] = None, year: Optional[int] = None) -> O
     savings_goal = profile["savings_goal"]
     spent = round(sum(s["spent"] for s in statuses), 2)
     budget_total = round(sum(s["budget"] for s in statuses), 2)
+    budget_left = round(sum(max(s["remaining"], 0.0) for s in statuses if s["budget"] > 0), 2)
+
+    # Income split for the donut: the parts always add up to exactly the income.
+    # Spending comes first, then the savings goal, then unspent budgets; budgets that
+    # add up to more than the income can't take more than what is actually left.
+    left = income
+    split_spent = min(spent, left)
+    left -= split_spent
+    split_savings = min(savings_goal, left)
+    left -= split_savings
+    split_budget_left = min(budget_left, left)
+    left -= split_budget_left
+    income_split = {
+        "Spent so far": round(split_spent, 2),
+        "Budget left": round(split_budget_left, 2),
+        "Savings goal": round(split_savings, 2),
+        "Not planned yet": round(left, 2),
+    }
+
     return {
         "monthly_income": income,
         "savings_goal": savings_goal,
@@ -206,8 +255,9 @@ def get_money_plan(month: Optional[int] = None, year: Optional[int] = None) -> O
         "budget_total": budget_total,
         "available_to_spend": round(income - savings_goal, 2),  # income - savings goal
         "budgets_over_available": round(max(budget_total - (income - savings_goal), 0.0), 2),
-        "budget_left": round(sum(max(s["remaining"], 0.0) for s in statuses if s["budget"] > 0), 2),
+        "budget_left": budget_left,
         "can_still_spend": round(income - savings_goal - spent, 2),
         "unplanned": round(max(income - savings_goal - budget_total, 0.0), 2),
+        "income_split": income_split,  # sums to monthly_income (used by the donut)
         "categories": [{**s, "label": STATUS_LABELS[s["status"]]} for s in statuses],
     }

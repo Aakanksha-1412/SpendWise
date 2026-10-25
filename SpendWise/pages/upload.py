@@ -22,6 +22,7 @@ from tools.categorization_tool import merchant_memory_version
 from tools.csv_import_tool import import_rows, read_transactions_csv
 from tools.database_tool import add_transaction
 from utils.helpers import CATEGORIES, format_inr, is_in_current_month
+from utils.ui import show_income_alerts
 
 
 @st.cache_data(show_spinner="Reading and categorizing transactions...")
@@ -35,6 +36,7 @@ def _read_csv(data: bytes, memory_version: int, user_id: int) -> dict:
 def render_upload_page() -> None:
     st.title("📤 Upload Expenses (CSV & Receipt OCR)")
     st.caption("Ingest bank/UPI statement CSVs or extract structured receipt fields using the OCR pipeline.")
+    show_income_alerts()
 
     col_csv, col_ocr = st.columns(2, gap="large")
 

@@ -18,9 +18,10 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from analytics.analytics import get_money_plan
-from tools.budget_tool import suggest_budgets
-from tools.database_tool import get_profile, get_transactions, remove_all_data, save_profile, upsert_budget
+from tools.budget_tool import check_budgets_fit, suggest_budgets
+from tools.database_tool import get_all_budgets, get_profile, get_transactions, remove_all_data, save_profile, upsert_budget
 from utils.helpers import CATEGORIES, format_inr, period_label
+from utils.ui import show_income_alerts
 
 
 def render_money_plan(plan: dict) -> None:
@@ -37,21 +38,12 @@ def render_money_plan(plan: dict) -> None:
             f"You can still spend **{format_inr(plan['can_still_spend'])}** this month "
             f"and keep your **{format_inr(plan['savings_goal'])}** savings goal."
         )
-    else:
-        st.error(
-            f"You've spent **{format_inr(-plan['can_still_spend'])}** more than income minus savings — "
-            "this is coming out of your savings goal."
-        )
+    show_income_alerts()
 
     left, right = st.columns([1, 1.4], gap="large")
     with left:
-        parts = [
-            ("Spent so far", plan["spent"], "#DC2626"),
-            ("Budget left", plan["budget_left"], "#0F766E"),
-            ("Savings goal", plan["savings_goal"], "#16A34A"),
-            ("Not planned yet", plan["unplanned"], "#94A3B8"),
-        ]
-        parts = [p for p in parts if p[1] > 0]
+        colors = {"Spent so far": "#DC2626", "Budget left": "#0F766E", "Savings goal": "#16A34A", "Not planned yet": "#94A3B8"}
+        parts = [(name, amount, colors[name]) for name, amount in plan["income_split"].items() if amount > 0]
         donut = go.Figure(
             go.Pie(
                 labels=[p[0] for p in parts],
@@ -148,12 +140,16 @@ def render_setup_form() -> None:
         submitted = st.form_submit_button("Save & create my budgets", type="primary")
 
     if submitted and _valid(income, savings_goal):
-        save_profile(income, savings_goal, {})  # profile first: demo data then never returns
-        removed = remove_all_data() if start_fresh else 0
         if any(amount for amount in typed.values()):
             budgets = {cat: amount or 0.0 for cat, amount in typed.items()}
         else:
             budgets = suggest_budgets(income, savings_goal, {})
+        too_much = check_budgets_fit(budgets, income, savings_goal)
+        if too_much:
+            st.error(too_much)
+            return
+        save_profile(income, savings_goal, {})  # profile first: demo data then never returns
+        removed = remove_all_data() if start_fresh else 0
         for cat, amount in budgets.items():
             upsert_budget(cat, amount)
         message = f"Saved! Your {period_label()} budgets total {format_inr(sum(budgets.values()))}."
@@ -172,6 +168,11 @@ def render_edit_form(profile) -> None:
         submitted = st.form_submit_button("Save", type="primary")
 
     if submitted and _valid(income, savings_goal):
+        # "Start fresh" removes the budgets, so then there is nothing that has to fit
+        too_much = None if start_fresh else check_budgets_fit(get_all_budgets(), income, savings_goal)
+        if too_much:
+            st.error(too_much + " Lower your budgets on the 🎯 Budget page first.")
+            return
         save_profile(income, savings_goal, profile["usual_spending"])
         message = "Saved!"
         if start_fresh:

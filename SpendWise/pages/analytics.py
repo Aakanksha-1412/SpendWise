@@ -24,14 +24,32 @@ from analytics.analytics import (
     get_weekly_comparison_df,
     get_monthly_spending_df,
     get_spending_trends_df,
+    get_money_plan,
 )
 from tools.spike_detector import detect_all_category_spikes
 from utils.helpers import format_inr, CATEGORY_COLORS, period_label
+from utils.ui import show_income_alerts
+
+
+def add_income_lines(fig: go.Figure, plan: dict) -> None:
+    """Dashed lines for the monthly income and for what can be spent while keeping the savings goal."""
+    fig.add_hline(
+        y=plan["monthly_income"], line_dash="dash", line_color="#DC2626",
+        annotation_text=f"Income {format_inr(plan['monthly_income'])}", annotation_position="top left",
+    )
+    if plan["savings_goal"] > 0:
+        fig.add_hline(
+            y=plan["available_to_spend"], line_dash="dot", line_color="#16A34A",
+            annotation_text=f"Spend limit (keeps savings) {format_inr(plan['available_to_spend'])}",
+            annotation_position="bottom left",
+        )
 
 
 def render_analytics_page() -> None:
     st.title("📊 Financial Analytics & Spike Detection")
     st.caption("Powered by Pandas aggregations (`analytics/analytics.py`) and anomaly detection (`tools/spike_detector.py`).")
+    plan = get_money_plan()
+    show_income_alerts()
 
     # -------------------------------------------------------------------------
     # 6. SPENDING SPIKE DETECTION BANNER
@@ -68,6 +86,8 @@ def render_analytics_page() -> None:
 
     with row1_col1:
         st.markdown("#### 1. Category-Wise Spending Distribution")
+        if cat_df["Spent"].sum() <= 0:
+            st.info(f"No spending recorded for {period_label()} yet.")
         fig_pie = px.pie(
             cat_df,
             names="Category",
@@ -142,6 +162,12 @@ def render_analytics_page() -> None:
             text_auto=".2s",
             color_discrete_sequence=["#0F766E"],
         )
+        if plan:
+            # months that cost more than the whole income are red
+            fig_mo.update_traces(
+                marker_color=["#DC2626" if v > plan["monthly_income"] else "#0F766E" for v in monthly_df["Total_Spent"]]
+            )
+            add_income_lines(fig_mo, plan)
         fig_mo.update_layout(
             height=340,
             margin=dict(l=10, r=10, t=20, b=10),
@@ -175,6 +201,8 @@ def render_analytics_page() -> None:
                 line=dict(color="#0F766E", width=3),
             )
         )
+        if plan:
+            add_income_lines(fig_trend, plan)
         fig_trend.update_layout(
             height=340,
             margin=dict(l=10, r=10, t=20, b=10),

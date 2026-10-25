@@ -20,11 +20,13 @@ from datetime import datetime
 from tools.database_tool import get_transactions, add_transaction
 from tools.categorization_tool import categorize_expense, parse_natural_language_expense
 from utils.helpers import CATEGORIES, format_inr
+from utils.ui import show_income_alerts
 
 
 def render_transactions_page() -> None:
     st.title("🧾 Transactions Ledger")
     st.caption("View, filter, and log expenses via natural language or structured entry. Backed by SQLite via `tools/database_tool.py`.")
+    show_income_alerts()
 
     # -------------------------------------------------------------------------
     # 1. ADD EXPENSE SECTION (NATURAL LANGUAGE + MANUAL FORM)

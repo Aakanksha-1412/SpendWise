@@ -108,6 +108,46 @@ def test_money_plan_numbers():
     assert labels["Bills"] == "– no budget"
 
 
+def test_income_split_adds_up_to_income():
+    from analytics.analytics import get_money_plan
+    from tools.database_tool import upsert_budget
+
+    database.init_db()
+    remove_all_data()
+    save_profile(monthly_income=20000, savings_goal=3000, usual_spending={})
+    upsert_budget("Food", 4000)
+    upsert_budget("Shopping", 1000)
+    add_transaction({"merchant": "Swiggy", "amount": 3500, "category": "Food", "date": ""})
+    add_transaction({"merchant": "Myntra", "amount": 1200, "category": "Shopping", "date": ""})
+
+    split = get_money_plan()["income_split"]
+
+    assert sum(split.values()) == 20000
+    assert split == {"Spent so far": 4700, "Budget left": 500, "Savings goal": 3000, "Not planned yet": 11800}
+
+
+def test_savings_share_is_right_when_budgets_are_more_than_income():
+    from analytics.analytics import get_money_plan
+    from tools.database_tool import upsert_budget
+
+    # income 2,00,000, savings 50,000 (25%), budgets total 5,47,500 and nothing spent
+    database.init_db()
+    remove_all_data()
+    save_profile(monthly_income=200000, savings_goal=50000, usual_spending={})
+    for cat, amount in {"Food": 20000, "Transport": 3000, "Shopping": 2500, "Entertainment": 2000,
+                        "Bills": 30000, "Healthcare": 40000, "Education": 450000}.items():
+        upsert_budget(cat, amount)
+
+    plan = get_money_plan()
+    split = plan["income_split"]
+
+    assert sum(split.values()) == 200000
+    assert split["Savings goal"] / 200000 == 0.25
+    assert split["Budget left"] == 150000
+    assert plan["can_still_spend"] == 150000
+    assert plan["budgets_over_available"] == 397500  # 5,47,500 - 1,50,000
+
+
 def test_no_money_plan_without_a_profile():
     from analytics.analytics import get_money_plan
 
