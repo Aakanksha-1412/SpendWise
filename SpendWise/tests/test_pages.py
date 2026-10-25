@@ -228,3 +228,49 @@ def test_typed_refund_is_not_saved_as_an_expense():
 
     assert any("This looks like money you received" in w.value for w in app.warning)
     assert get_transactions() == []
+
+
+def _demo_receipt_form():
+    from tools.database_tool import remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+    app = AppTest.from_file(str(PAGES / "upload.py"), default_timeout=60).run()
+    next(b for b in app.button if b.label.startswith("Run Demo Receipt")).click().run()
+    return app
+
+
+def _save_receipt(app):
+    next(b for b in app.button if b.label == "Save Extracted Receipt to SQLite").click().run()
+
+
+def test_receipt_needs_a_shop_name_and_a_total_above_zero():
+    from tools.database_tool import get_transactions
+
+    app = _demo_receipt_form()
+    next(t for t in app.text_input if t.label == "Merchant").set_value("  ")
+    _save_receipt(app)
+    assert any("Please enter the shop name." in e.value for e in app.error)
+
+    next(t for t in app.text_input if t.label == "Merchant").set_value("Starbucks")
+    next(n for n in app.number_input if n.label == "Extracted Total (₹)").set_value(0.0)
+    _save_receipt(app)
+    assert any("Please enter the bill total (more than ₹0)." in e.value for e in app.error)
+    assert get_transactions() == []
+
+
+def test_the_same_receipt_is_not_saved_twice_unless_the_user_says_so():
+    from tools.database_tool import get_transactions
+
+    app = _demo_receipt_form()
+    _save_receipt(app)
+    assert len(get_transactions()) == 1
+
+    next(b for b in app.button if b.label.startswith("Run Demo Receipt")).click().run()
+    _save_receipt(app)
+    assert any("so it was not saved again" in w.value for w in app.warning)
+    assert len(get_transactions()) == 1
+
+    next(c for c in app.checkbox if c.label.startswith("This is a different purchase")).check()
+    _save_receipt(app)
+    assert len(get_transactions()) == 2

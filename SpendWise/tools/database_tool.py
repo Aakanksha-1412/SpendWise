@@ -137,6 +137,18 @@ def get_transactions(
     return rows
 
 
+def expense_already_saved(date: str, merchant: str, amount: float) -> bool:
+    """True if this user already has an expense with the same date, merchant (any case) and amount."""
+    init_db()
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT 1 FROM transactions WHERE user_id = ? AND date = ? AND LOWER(TRIM(merchant)) = ? AND ROUND(amount, 2) = ?",
+        (current_user_id(), normalize_date(date), merchant.strip().lower(), round(float(amount), 2)),
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
 def get_transactions_df() -> Any:
     """
     Return all transactions as a Pandas DataFrame for analytics and budget comparisons.

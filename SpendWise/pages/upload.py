@@ -20,8 +20,8 @@ from database.database import current_user_id
 from tools.ocr_tool import extract_receipt
 from tools.categorization_tool import merchant_memory_version
 from tools.csv_import_tool import import_rows, read_transactions_csv
-from tools.database_tool import add_transaction
-from utils.helpers import CATEGORIES, expense_date_error, format_inr, is_in_current_month
+from tools.database_tool import add_transaction, expense_already_saved
+from utils.helpers import CATEGORIES, expense_date_error, format_inr, is_in_current_month, normalize_date
 
 
 @st.cache_data(show_spinner="Reading and categorizing transactions...")
@@ -30,6 +30,15 @@ def _read_csv(data: bytes, memory_version: int, user_id: int) -> dict:
     ChromaDB lookups. `memory_version` and `user_id` are part of the cache key, so newly learned
     merchants are picked up and one user's cached result is never shown to another."""
     return read_transactions_csv(data)
+
+
+def _receipt_problem(merchant: str, total: float, date: str):
+    """What stops this receipt from being saved (plain English), or None."""
+    if not merchant.strip():
+        return "Please enter the shop name."
+    if total <= 0:
+        return "Please enter the bill total (more than ₹0)."
+    return expense_date_error(date)
 
 
 def render_upload_page() -> None:
@@ -88,13 +97,16 @@ def render_upload_page() -> None:
         if st.session_state.get("ocr_upload_id") != current_upload:
             st.session_state["ocr_upload_id"] = current_upload
             st.session_state.pop("ocr_result", None)
+            st.session_state.pop("receipt_duplicate_message", None)
 
         if st.button("Run Demo Receipt Extraction (No File Needed)", width="stretch"):
+            st.session_state.pop("receipt_duplicate_message", None)
             st.session_state["ocr_result"] = extract_receipt(None, filename_hint="starbucks_receipt.jpg")
 
         if uploaded_image is not None:
             st.image(uploaded_image, caption="Uploaded Receipt Image", width=260)
             if st.button("Extract Receipt via OCR Tool", type="primary", width="stretch"):
+                st.session_state.pop("receipt_duplicate_message", None)
                 st.session_state["ocr_result"] = extract_receipt(
                     uploaded_image, filename_hint=uploaded_image.name
                 )
@@ -131,15 +143,33 @@ def render_upload_page() -> None:
                         else 0,
                     )
                 with e_col2:
-                    tax_val = st.number_input("Extracted Tax (₹)", value=float(ocr_data["tax"]), step=5.0)
-                    total_val = st.number_input("Extracted Total (₹)", value=float(ocr_data["total"]), step=10.0)
+                    tax_val = st.number_input(
+                        "Extracted Tax (₹)", min_value=0.0, value=max(float(ocr_data["tax"]), 0.0), step=5.0
+                    )
+                    total_val = st.number_input(
+                        "Extracted Total (₹)", min_value=0.0, value=max(float(ocr_data["total"]), 0.0), step=10.0
+                    )
                     desc_val = st.text_input("Extracted Items", value=ocr_data["description"])
 
+                duplicate_message = st.session_state.get("receipt_duplicate_message")
+                if duplicate_message:
+                    st.warning(duplicate_message)
+                    save_anyway = st.checkbox("This is a different purchase — save it anyway")
+                else:
+                    save_anyway = False
+
                 if st.form_submit_button("Save Extracted Receipt to SQLite", type="primary"):
-                    date_problem = expense_date_error(date_val)
-                    if date_problem:
-                        st.error(f"**This expense was not saved.** {date_problem}")
+                    problem = _receipt_problem(merchant, total_val, date_val)
+                    if problem:
+                        st.error(f"**This expense was not saved.** {problem}")
                         st.stop()
+                    if not save_anyway and expense_already_saved(date_val, merchant, total_val):
+                        st.session_state["receipt_duplicate_message"] = (
+                            f"You already saved {format_inr(total_val)} at {merchant.strip()} on "
+                            f"{normalize_date(date_val)}, so it was not saved again."
+                        )
+                        st.rerun()
+                    st.session_state.pop("receipt_duplicate_message", None)
                     saved = add_transaction(
                         {
                             "date": date_val,
