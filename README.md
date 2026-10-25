@@ -2,8 +2,9 @@
 
 **Autonomous Personal Financial Expense & Budgeting Assistant**
 
-The entire project lives in the [`SpendWise/`](SpendWise/) folder (Python + Streamlit + LangGraph).
-See [`SpendWise/README.md`](SpendWise/README.md) for architecture, team ownership and setup.
+The entire project lives in the [`SpendWise/`](SpendWise/) folder (Python + Streamlit + LangGraph + Gemini).
+See [`SpendWise/README.md`](SpendWise/README.md) for the full guide: features, technology, architecture,
+every page and chart, the money rules, the AI assistant, setup, tests and team ownership.
 
 ## Quick start
 
