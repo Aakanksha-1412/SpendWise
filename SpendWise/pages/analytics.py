@@ -45,7 +45,7 @@ def render_analytics_page() -> None:
             st.markdown(
                 f"""
                 <div class="sw-alert-box">
-                    <strong>🚨 Spending Spike Detected — {sp['category']} (+{sp['increase_pct']}%)</strong><br/>
+                    <strong>🚨 Spending Spike Detected — {sp['category']} ({sp['change_label']})</strong><br/>
                     Previous weekly {sp['category']} spending: <b>{format_inr(sp['previous_weekly_spending'])}</b> ·
                     Current weekly {sp['category']} spending: <b>{format_inr(sp['current_weekly_spending'])}</b><br/>
                     <span>{sp['message']}</span>

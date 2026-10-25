@@ -7,7 +7,8 @@ Responsibility:
 - Compares current weekly spending (the last 7 days, including today) against the
   previous week (the 7 days before that) using Pandas. Windows move with today's date.
 - Flags categories where spending has spiked significantly (>= 35% increase and
-  delta >= ₹300).
+  delta >= ₹300). With nothing spent last week there is no percentage: new spending of
+  ₹300+ is flagged only if the category has earlier history to compare with.
 """
 
 from datetime import date, datetime, timedelta
@@ -51,7 +52,7 @@ def detect_spending_spike(category: str, threshold_pct: float = 35.0) -> Dict[st
             "previous_weekly_spending": float,
             "current_weekly_spending": float,
             "increase_amount": float,
-            "increase_pct": float,
+            "increase_pct": float | None (None when nothing was spent last week),
             "spike_detected": bool,
             "message": str
         }
@@ -65,7 +66,8 @@ def detect_spending_spike(category: str, threshold_pct: float = 35.0) -> Dict[st
                 "previous_weekly_spending": 0.0,
                 "current_weekly_spending": 0.0,
                 "increase_amount": 0.0,
-                "increase_pct": 0.0,
+                "increase_pct": None,
+                "change_label": "new",
                 "spike_detected": False,
                 "message": f"No transaction history available for {category}.",
             }
@@ -78,35 +80,45 @@ def detect_spending_spike(category: str, threshold_pct: float = 35.0) -> Dict[st
 
         prev_spend = float(cat_df.loc[prev_mask, "amount"].sum())
         curr_spend = float(cat_df.loc[curr_mask, "amount"].sum())
+        has_history = bool((cat_df["parsed_date"] < current_week[0]).any())
     else:
         records = get_transactions()
         prev_spend = 0.0
         curr_spend = 0.0
+        has_history = False
         for r in records:
             if r["category"].strip().lower() == category.strip().lower():
                 try:
                     dt = datetime.strptime(r["date"], "%d-%m-%Y")
-                    iso = dt.strftime("%Y-%m-%d")
-                    if previous_week[0] <= iso <= previous_week[1]:
-                        prev_spend += float(r["amount"])
-                    elif current_week[0] <= iso <= current_week[1]:
-                        curr_spend += float(r["amount"])
                 except ValueError:
                     continue
+                iso = dt.strftime("%Y-%m-%d")
+                has_history = has_history or iso < current_week[0]
+                if previous_week[0] <= iso <= previous_week[1]:
+                    prev_spend += float(r["amount"])
+                elif current_week[0] <= iso <= current_week[1]:
+                    curr_spend += float(r["amount"])
     diff = round(curr_spend - prev_spend, 2)
 
+    # A percentage only makes sense against something: with nothing spent last week
+    # it is None, and the ₹ increase alone decides.
+    pct_increase = round((diff / prev_spend) * 100.0, 1) if prev_spend > 0 else None
     if prev_spend > 0:
-        pct_increase = round((diff / prev_spend) * 100.0, 1)
+        spike_detected = pct_increase >= threshold_pct and diff >= 300.0
     else:
-        pct_increase = 100.0 if curr_spend > 500 else 0.0
+        # Nothing last week: new spending of ₹300+ is a spike, unless this category has
+        # no earlier history at all (e.g. a brand-new user) — then there's nothing to compare.
+        spike_detected = has_history and diff >= 300.0
 
-    spike_detected = (pct_increase >= threshold_pct) and (diff >= 300.0)
-
-    if spike_detected:
+    if spike_detected and pct_increase is None:
+        msg = f"New {category} spending of {format_inr(curr_spend)} this week (nothing in the previous week)."
+    elif spike_detected:
         msg = (
             f"{category} spending has increased significantly (+{pct_increase}%) "
             f"from {format_inr(prev_spend)} in the previous week to {format_inr(curr_spend)} this week."
         )
+    elif not has_history and prev_spend == 0:
+        msg = f"Not enough {category} history yet to compare weeks ({format_inr(curr_spend)} this week)."
     else:
         msg = f"{category} weekly spending is within normal historical variance ({format_inr(curr_spend)} vs {format_inr(prev_spend)} previously)."
 
@@ -116,6 +128,7 @@ def detect_spending_spike(category: str, threshold_pct: float = 35.0) -> Dict[st
         "current_weekly_spending": curr_spend,
         "increase_amount": diff,
         "increase_pct": pct_increase,
+        "change_label": f"{pct_increase:+.1f}%" if pct_increase is not None else "new",  # for display
         "spike_detected": spike_detected,
         "message": msg,
     }

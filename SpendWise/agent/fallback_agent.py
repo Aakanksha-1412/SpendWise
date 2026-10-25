@@ -447,7 +447,7 @@ def generate_response_node(state: AgentState) -> AgentState:
             top = active_spikes[0]
             response = (
                 f"### Spending Spike Analysis\n\n"
-                f"🚨 **{top['category']}** increased the most this week (**+{top['increase_pct']}%**).\n\n"
+                f"🚨 **{top['category']}** increased the most this week (**{top['change_label']}**).\n\n"
                 f"- **Previous Weekly {top['category']} Spending:** {format_inr(top['previous_weekly_spending'])}\n"
                 f"- **Current Weekly {top['category']} Spending:** **{format_inr(top['current_weekly_spending'])}**\n"
                 f"- **Net Weekly Increase:** +{format_inr(top['increase_amount'])}\n\n"
@@ -482,7 +482,7 @@ def generate_response_node(state: AgentState) -> AgentState:
             f"{c['category']} over budget by {format_inr(abs(c['remaining']))}"
             for c in reallocation.get("over_budget_categories", [])
         ] + [
-            f"weekly {s['category']} spike +{s['increase_pct']}%"
+            f"weekly {s['category']} spike {s['change_label']}"
             for s in outputs.get("all_spikes", [])
             if s["spike_detected"]
         ]
