@@ -288,7 +288,9 @@ def set_budget(category: str, amount: float) -> Dict[str, Any]:
         return {"error": "A budget can't be negative.", "saved": False}
     profile = get_profile()
     if profile:
-        too_much = check_budgets_fit({**get_all_budgets(), official: amount}, profile["monthly_income"], profile["savings_goal"])
+        too_much = check_budgets_fit(
+            {**get_all_budgets(), official: amount}, profile["monthly_income"], profile["savings_goal"], changed=official
+        )
         if too_much:
             return {"error": f"This budget was not saved. {too_much}", "saved": False}
     upsert_budget(official, amount)
