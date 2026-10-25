@@ -16,8 +16,13 @@ def test_add_expense_rejects_a_date_it_cannot_read():
 
 
 def test_search_lists_newest_dates_first_even_if_older_rows_were_added_later():
-    add_expense.invoke({"merchant": "Recent Cafe", "amount": 90, "category": "Food", "date": "11-10-2026"})
-    add_expense.invoke({"merchant": "Old Import Cafe", "amount": 70, "category": "Food", "date": "01-09-2026"})
+    from datetime import date, timedelta
+
+    _fresh_user_with_profile(income=20000, savings=2000)  # no demo rows newer than ours
+    recent = (date.today() - timedelta(days=2)).strftime("%d-%m-%Y")
+    older = (date.today() - timedelta(days=40)).strftime("%d-%m-%Y")
+    add_expense.invoke({"merchant": "Recent Cafe", "amount": 90, "category": "Food", "date": recent})
+    add_expense.invoke({"merchant": "Old Import Cafe", "amount": 70, "category": "Food", "date": older})
 
     newest = search_transactions.invoke({"category": "Food", "limit": 1})
 
