@@ -115,3 +115,24 @@ def test_money_received_is_recognised():
     assert parse("Received 2000 from Rahul")["looks_like_income"] is True
     assert parse("Salary credited 50000")["looks_like_income"] is True
     assert parse("Spent 450 at Swiggy")["looks_like_income"] is False
+
+
+def test_keywords_only_match_whole_words():
+    from tools.categorization_tool import categorize_expense
+
+    assert categorize_expense("Apollo Pharmacy", "Multivitamin Tablets", use_semantic=False) == "Healthcare"
+    assert categorize_expense("Vishal Mega Mart", use_semantic=False) == "Others"  # not "vi" -> Bills
+    assert categorize_expense("Torrent Pharma", use_semantic=False) == "Others"  # not "rent" -> Bills
+    assert categorize_expense("Coca Cola", use_semantic=False) == "Others"  # not "ola" -> Transport
+    assert categorize_expense("Python Training", use_semantic=False) == "Others"  # not "train"
+    assert categorize_expense("Vi", "prepaid recharge", use_semantic=False) == "Bills"
+    assert categorize_expense("H&M", use_semantic=False) == "Shopping"
+
+
+def test_the_shop_name_and_the_most_specific_keyword_win():
+    from tools.categorization_tool import categorize_expense
+
+    assert categorize_expense("Metro Shoes", use_semantic=False) == "Shopping"
+    assert categorize_expense("Delhi Metro", use_semantic=False) == "Transport"
+    assert categorize_expense("Croma", "dinner snacks", use_semantic=False) == "Shopping"  # shop name decides
+    assert categorize_expense("Local Store", "2 pizzas", use_semantic=False) == "Food"  # plural still matches

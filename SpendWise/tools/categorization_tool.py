@@ -41,7 +41,7 @@ MERCHANT_CATEGORY_KEYWORDS: Dict[str, list[str]] = {
     "Shopping": [
         "amazon", "flipkart", "myntra", "ajio", "croma", "reliance digital",
         "nykaa", "zara", "h&m", "decathlon", "shoes", "jacket", "clothes",
-        "keyboard", "electronics", "mall", "shopping"
+        "keyboard", "electronics", "mall", "shopping", "metro shoes"
     ],
     "Entertainment": [
         "bookmyshow", "pvr", "inox", "netflix", "spotify", "prime video",
@@ -102,16 +102,28 @@ def categorize_expense(merchant: str, description: str = "", use_semantic: bool 
        (learned merchants + category descriptions).
     3. Otherwise "Others".
     """
-    combined_text = f"{merchant} {description}".lower().strip()
-
-    for category, keywords in MERCHANT_CATEGORY_KEYWORDS.items():
-        for kw in keywords:
-            if kw in combined_text:
-                return category
+    # The shop name decides first; the description only when the name has no keyword
+    category = _keyword_category(merchant) or _keyword_category(description)
+    if category:
+        return category
 
     if not use_semantic:
         return "Others"
     return semantic_category(merchant, description) or "Others"
+
+
+def _keyword_category(text: str) -> Optional[str]:
+    """
+    Category of the longest keyword found in `text` as a whole word (plural allowed), so
+    "vi" doesn't match "multivitamin" and "metro shoes" beats "metro". None if none match.
+    """
+    text = (text or "").lower()
+    best_category, best_length = None, 0
+    for category, keywords in MERCHANT_CATEGORY_KEYWORDS.items():
+        for kw in keywords:
+            if len(kw) > best_length and re.search(rf"(?<![a-z0-9]){re.escape(kw)}(?:s|es)?(?![a-z0-9])", text):
+                best_category, best_length = category, len(kw)
+    return best_category
 
 
 def merchant_memory_version() -> int:
