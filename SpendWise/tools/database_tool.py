@@ -109,9 +109,12 @@ def get_transactions(
     category: Optional[str] = None,
     merchant_query: Optional[str] = None,
     date_filter: Optional[str] = None,
+    month: Optional[int] = None,
+    year: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Retrieve transactions from SQLite with optional filters for category, merchant, and date.
+    Retrieve transactions from SQLite with optional filters for category, merchant, date,
+    and month (month + year together). Newest entry first.
     """
     init_db()
     conn = get_connection()
@@ -136,11 +139,67 @@ def get_transactions(
         query += " AND date = ?"
         params.append(normalized)
 
+    if month and year:
+        query += " AND substr(date, 4, 7) = ?"  # DD-MM-YYYY -> "MM-YYYY"
+        params.append(f"{int(month):02d}-{int(year)}")
+
     query += " ORDER BY id DESC"
     cursor.execute(query, params)
     rows = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return rows
+
+
+def get_transaction_months() -> List[tuple]:
+    """(month, year) pairs that have expenses, newest first (unreadable dates are skipped)."""
+    months = set()
+    for row in get_transactions():
+        try:
+            parsed = datetime.strptime(row["date"], "%d-%m-%Y")
+        except ValueError:
+            continue
+        months.add((parsed.month, parsed.year))
+    return sorted(months, key=lambda m: (m[1], m[0]), reverse=True)
+
+
+def update_transaction(transaction_id: int, changes: Dict[str, Any]) -> bool:
+    """
+    Change one of THIS user's expenses (date, merchant, amount, category, description).
+    Returns False if it doesn't exist or belongs to someone else.
+    """
+    allowed = {key: changes[key] for key in ("date", "merchant", "amount", "category", "description") if key in changes}
+    if "date" in allowed:
+        allowed["date"] = normalize_date(str(allowed["date"]))
+    if "category" in allowed:
+        category_text = str(allowed["category"]).strip().lower()
+        allowed["category"] = next((c for c in CATEGORIES if c.lower() == category_text), "Others")
+    if not allowed:
+        return False
+    init_db()
+    conn = get_connection()
+    try:
+        with conn:
+            cursor = conn.execute(
+                f"UPDATE transactions SET {', '.join(f'{key} = ?' for key in allowed)} WHERE id = ? AND user_id = ?",
+                (*allowed.values(), int(transaction_id), current_user_id()),
+            )
+    finally:
+        conn.close()
+    return cursor.rowcount == 1
+
+
+def delete_transaction(transaction_id: int) -> bool:
+    """Delete one of THIS user's expenses. Returns False if it doesn't exist or isn't theirs."""
+    init_db()
+    conn = get_connection()
+    try:
+        with conn:
+            cursor = conn.execute(
+                "DELETE FROM transactions WHERE id = ? AND user_id = ?", (int(transaction_id), current_user_id())
+            )
+    finally:
+        conn.close()
+    return cursor.rowcount == 1
 
 
 def expense_already_saved(date: str, merchant: str, amount: float) -> bool:

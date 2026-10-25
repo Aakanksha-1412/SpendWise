@@ -274,3 +274,84 @@ def test_the_same_receipt_is_not_saved_twice_unless_the_user_says_so():
     next(c for c in app.checkbox if c.label.startswith("This is a different purchase")).check()
     _save_receipt(app)
     assert len(get_transactions()) == 2
+
+
+def _ledger_with_two_months():
+    from datetime import date, timedelta
+    from tools.database_tool import add_transaction, remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+    today = date.today()
+    last_month = (today.replace(day=1) - timedelta(days=1)).replace(day=5)
+    add_transaction({"merchant": "Swiggy", "amount": 450, "category": "Food", "date": today.strftime("%d-%m-%Y")})
+    add_transaction({"merchant": "Zomato", "amount": 6000, "category": "Food", "date": last_month.strftime("%d-%m-%Y")})
+
+
+def test_transactions_total_is_for_this_month_by_default():
+    _ledger_with_two_months()
+
+    app = AppTest.from_file(str(PAGES / "transactions.py"), default_timeout=60).run()
+
+    text = " ".join(m.value for m in app.markdown)
+    assert "Showing 1 transaction(s)" in text and "₹450" in text
+    month = next(s for s in app.selectbox if s.label == "Month")
+    month.select_index(len(month.options) - 1).run()  # "All months"
+    text = " ".join(m.value for m in app.markdown)
+    assert "Total for all months: **₹6,450**" in text
+
+
+def test_added_message_is_shown_after_the_page_reloads():
+    from tools.database_tool import remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+
+    app = AppTest.from_file(str(PAGES / "transactions.py"), default_timeout=60).run()
+    app.text_input[0].set_value("Spent ₹450 at Swiggy")
+    next(b for b in app.button if b.label == "Parse & Add").click().run()
+
+    assert any("Added: Swiggy — ₹450" in s.value for s in app.success)
+
+
+def test_an_expense_can_be_edited_and_deleted():
+    from tools.database_tool import get_transactions
+
+    _ledger_with_two_months()
+    app = AppTest.from_file(str(PAGES / "transactions.py"), default_timeout=60).run()
+    chooser = next(s for s in app.selectbox if s.label == "Choose an expense")
+    chooser.set_value(get_transactions(merchant_query="swiggy")[0]).run()
+
+    next(t for t in app.text_input if t.label == "Merchant" and t.value == "Swiggy").set_value("Swiggy Instamart")
+    next(n for n in app.number_input if n.label == "Amount (₹)" and n.value == 450.0).set_value(500.0)
+    next(b for b in app.button if b.label == "Save changes").click().run()
+
+    edited = get_transactions(merchant_query="instamart")[0]
+    assert edited["amount"] == 500.0
+    assert any("Updated: Swiggy Instamart — ₹500" in s.value for s in app.success)
+
+    chooser = next(s for s in app.selectbox if s.label == "Choose an expense")
+    chooser.set_value(edited).run()
+    next(b for b in app.button if b.label == "Delete expense").click().run()
+    assert any("Tick" in w.value for w in app.warning)  # needs the confirmation tick
+    assert get_transactions(merchant_query="instamart")
+
+    next(c for c in app.checkbox if c.label.startswith("Yes, delete")).check()
+    next(b for b in app.button if b.label == "Delete expense").click().run()
+    assert get_transactions(merchant_query="instamart") == []
+
+
+def test_one_user_cannot_change_another_users_expense():
+    import database.database as database
+    from tools.database_tool import add_transaction, delete_transaction, get_transactions, update_transaction
+
+    database.set_current_user(1)
+    mine = add_transaction({"merchant": "Swiggy", "amount": 450, "category": "Food", "date": ""})
+    database.set_current_user(2)
+    try:
+        assert update_transaction(mine["id"], {"amount": 1}) is False
+        assert delete_transaction(mine["id"]) is False
+    finally:
+        database.set_current_user(1)
+    assert get_transactions()[0]["amount"] == 450.0
+    database.set_current_user(None)
