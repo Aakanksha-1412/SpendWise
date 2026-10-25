@@ -49,3 +49,18 @@ def test_category_spelling_from_a_csv_is_accepted_in_any_case():
     bulk_insert_transactions([{"date": "", "merchant": "Swiggy", "amount": 200, "category": "food", "description": ""}])
 
     assert get_transactions(merchant_query="swiggy")[0]["category"] == "Food"
+
+
+def test_amounts_use_indian_digit_grouping():
+    from utils.helpers import format_inr
+
+    assert format_inr(0) == "₹0"
+    assert format_inr(999) == "₹999"
+    assert format_inr(4500) == "₹4,500"
+    assert format_inr(200000) == "₹2,00,000"
+    assert format_inr(547500) == "₹5,47,500"
+    assert format_inr(1250000) == "₹12,50,000"
+    assert format_inr(123456789) == "₹12,34,56,789"
+    assert format_inr(1234.5) == "₹1,234.50"
+    assert format_inr(-397500) == "-₹3,97,500"
+    assert format_inr(2100, include_sign=True) == "+₹2,100"

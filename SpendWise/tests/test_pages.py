@@ -90,8 +90,8 @@ def test_home_cards_do_not_show_money_the_user_does_not_have():
     app = AppTest.from_file(str(PAGES / "home.py"), default_timeout=60).run()
 
     text = " ".join(m.value for m in app.markdown)
-    assert "₹150,000</div>" in text and "Left to spend this month" in text
-    assert "More than you can plan (₹150,000)" in text
+    assert "₹1,50,000</div>" in text and "Left to spend this month" in text
+    assert "More than you can plan (₹1,50,000)" in text
 
 
 def test_profile_edit_has_only_income_and_savings_and_keeps_budgets():
@@ -163,7 +163,7 @@ def test_first_setup_refuses_budgets_more_than_income():
     app.number_input(key="setup_budget_Education").set_value(450000.0)
     next(b for b in app.button if b.label == "Save & create my budgets").click().run()
 
-    assert any("Please reduce them by ₹300,000" in e.value for e in app.error)
+    assert any("Please reduce them by ₹3,00,000" in e.value for e in app.error)
     assert get_profile() is None  # nothing saved
 
 

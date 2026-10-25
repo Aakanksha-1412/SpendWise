@@ -55,15 +55,23 @@ CATEGORY_COLORS: Dict[str, str] = {
 
 def format_inr(amount: float, include_sign: bool = False) -> str:
     """
-    Format a numeric value in Indian Rupee (₹) notation with comma separators.
-    Example: 6100 -> '₹6,100' | -2100 -> '-₹2,100'
+    Format a numeric value in Indian Rupee (₹) notation with Indian digit grouping
+    (last three digits, then groups of two).
+    Example: 6100 -> '₹6,100' | 200000 -> '₹2,00,000' | -2100 -> '-₹2,100'
     """
     is_negative = amount < 0
     abs_val = abs(round(float(amount), 2))
-    if abs_val.is_integer():
-        formatted = f"{int(abs_val):,}"
-    else:
-        formatted = f"{abs_val:,.2f}"
+    rupees, paise = f"{abs_val:.2f}".split(".")
+    head, last_three = rupees[:-3], rupees[-3:]
+    groups = []
+    while len(head) > 2:
+        groups.insert(0, head[-2:])
+        head = head[:-2]
+    if head:
+        groups.insert(0, head)
+    formatted = ",".join(groups + [last_three])
+    if not abs_val.is_integer():
+        formatted += f".{paise}"
 
     if is_negative:
         return f"-₹{formatted}"
