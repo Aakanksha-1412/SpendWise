@@ -5,7 +5,7 @@ Owner: Member 2 (Database + Categorization)
 
 Responsibility:
 - Manages the SQLite3 database connection (`spendwise.db`).
-- Creates the tables: users, transactions, budgets, profile, usual_spending.
+- Creates the tables: users, login_sessions, transactions, budgets, profile, usual_spending.
 - Every row belongs to a user (`user_id`). The logged-in user of the current browser
   session is set with `set_current_user()` (done by app.py after login), and
   `tools/database_tool.py` only reads/writes that user's rows.
@@ -101,6 +101,11 @@ def init_db(db_path: Optional[str] = None, allow_demo: bool = True) -> None:
             monthly_income REAL NOT NULL,
             savings_goal REAL NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS login_sessions (
+            token_hash TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            expires_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS usual_spending (
             user_id INTEGER NOT NULL DEFAULT 0,
