@@ -89,3 +89,137 @@ def test_demo_mode_says_when_a_receipt_photo_could_not_be_read(no_gemini, monkey
 
     assert result["mode"] == "fallback"
     assert "couldn't read" in result["response"]
+
+
+def _user_with_budget_saved_above_income():
+    from tools.database_tool import add_transaction, remove_all_data, save_profile, upsert_budget
+
+    save_profile(200000, 50000, {})
+    remove_all_data()
+    upsert_budget("Education", 450000)  # saved before budgets were limited to the income
+    add_transaction({"merchant": "Swiggy", "amount": 11400, "category": "Food", "date": ""})
+
+
+def test_demo_mode_affordability_keeps_the_savings_goal(no_gemini):
+    _user_with_budget_saved_above_income()
+
+    result = run_agent("can I afford ₹2,00,000 on education?")
+
+    assert result["mode"] == "fallback"
+    assert "No. You only have ₹1,38,600 left to spend this month while keeping your ₹50,000 savings goal." in result["response"]
+    assert "more than all the money you have left this month (₹1,88,600)" in result["response"]
+
+
+def test_demo_mode_does_not_add_an_expense_dated_in_the_future(no_gemini):
+    from datetime import date, timedelta
+    from tools.database_tool import get_transactions, remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+    tomorrow = (date.today() + timedelta(days=1)).strftime("%d-%m-%Y")
+
+    result = run_agent(f"add ₹500 at Swiggy on {tomorrow} and tell me my food budget left")
+
+    assert f"The date {tomorrow} is in the future" in result["response"]
+    assert get_transactions() == []
+
+
+def test_demo_mode_does_not_add_an_expense_with_an_impossible_date(no_gemini):
+    from tools.database_tool import get_transactions, remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+
+    result = run_agent("add ₹450 at Swiggy on 10-13-2026 and tell me my food budget left")
+
+    assert '"10-13-2026" is not a real date' in result["response"]
+    assert get_transactions() == []
+
+
+def _fresh_demo_user(budgets=None):
+    from tools.database_tool import remove_all_data, save_profile, upsert_budget
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+    for category, amount in (budgets or {}).items():
+        upsert_budget(category, amount)
+
+
+def test_demo_mode_never_saves_a_made_up_receipt(no_gemini):
+    from tools.database_tool import get_transactions
+
+    _fresh_demo_user({"Shopping": 4000})
+
+    run_agent("I lost my amazon receipt, how much shopping budget is left?")
+    result = run_agent("add my receipt and tell me the budget left")
+
+    assert get_transactions() == []
+    assert "I don't see a receipt photo" in result["response"]
+
+
+def test_demo_mode_does_not_save_questions_or_what_ifs(no_gemini):
+    from tools.database_tool import get_transactions
+
+    _fresh_demo_user({"Food": 5000})
+
+    run_agent("If I spent ₹500 on food, how much budget would be left?")
+    run_agent("Can I afford to add another ₹500 on food?")
+    run_agent("I spent 20% more on food this week, how much budget is left?")
+    run_agent("how much have I spent on food this month?")
+
+    assert get_transactions() == []
+
+
+def test_demo_mode_still_saves_a_clear_request(no_gemini):
+    from tools.database_tool import get_transactions
+
+    _fresh_demo_user({"Food": 5000})
+
+    run_agent("Add ₹450 at Swiggy for food and tell me my food budget left")
+
+    assert [(t["merchant"], t["amount"]) for t in get_transactions()] == [("Swiggy", 450.0)]
+
+
+def test_demo_mode_affordability_without_a_category_does_not_assume_food(no_gemini):
+    _fresh_demo_user({"Food": 500})
+
+    result = run_agent("Can I afford ₹2000 this month?")
+
+    assert "Food" not in result["response"]
+    assert "Yes, overall." in result["response"] and "₹18,000" in result["response"]
+
+
+def test_demo_mode_affordability_with_no_budget_set_does_not_say_exceed(no_gemini):
+    _fresh_demo_user()
+
+    result = run_agent("Can I afford ₹200 on healthcare medicine?")
+
+    assert "exceed" not in result["response"].lower()
+    assert "You haven't set a Healthcare budget" in result["response"]
+
+
+def test_demo_mode_explains_the_alert_that_was_asked_about(no_gemini):
+    from freezegun import freeze_time
+    from tools.database_tool import add_transaction
+
+    with freeze_time("2027-01-20"):
+        _fresh_demo_user({"Food": 10000, "Shopping": 1000})
+        add_transaction({"merchant": "Myntra", "amount": 2000, "category": "Shopping", "date": "18-01-2027"})  # over budget
+        add_transaction({"merchant": "Swiggy", "amount": 500, "category": "Food", "date": "10-01-2027"})
+        add_transaction({"merchant": "Swiggy", "amount": 1500, "category": "Food", "date": "18-01-2027"})  # spike
+
+        result = run_agent("Why did I receive a food alert?")
+
+    assert "Food Spending Alert" in result["response"]
+    assert "Shopping" not in result["response"]
+
+
+def test_demo_mode_asks_for_details_on_a_bare_yes(no_gemini):
+    from tools.database_tool import get_transactions
+
+    _fresh_demo_user()
+
+    result = run_agent("yes, log it")
+
+    assert "nothing was saved" in result["response"]
+    assert get_transactions() == []

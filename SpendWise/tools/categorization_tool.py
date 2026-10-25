@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from database.database import current_user_id
-from utils.helpers import CATEGORIES
+from utils.helpers import CATEGORIES, normalize_date
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ MERCHANT_CATEGORY_KEYWORDS: Dict[str, list[str]] = {
     "Shopping": [
         "amazon", "flipkart", "myntra", "ajio", "croma", "reliance digital",
         "nykaa", "zara", "h&m", "decathlon", "shoes", "jacket", "clothes",
-        "keyboard", "electronics", "mall", "shopping"
+        "keyboard", "electronics", "mall", "shopping", "metro shoes"
     ],
     "Entertainment": [
         "bookmyshow", "pvr", "inox", "netflix", "spotify", "prime video",
@@ -102,16 +102,28 @@ def categorize_expense(merchant: str, description: str = "", use_semantic: bool 
        (learned merchants + category descriptions).
     3. Otherwise "Others".
     """
-    combined_text = f"{merchant} {description}".lower().strip()
-
-    for category, keywords in MERCHANT_CATEGORY_KEYWORDS.items():
-        for kw in keywords:
-            if kw in combined_text:
-                return category
+    # The shop name decides first; the description only when the name has no keyword
+    category = _keyword_category(merchant) or _keyword_category(description)
+    if category:
+        return category
 
     if not use_semantic:
         return "Others"
     return semantic_category(merchant, description) or "Others"
+
+
+def _keyword_category(text: str) -> Optional[str]:
+    """
+    Category of the longest keyword found in `text` as a whole word (plural allowed), so
+    "vi" doesn't match "multivitamin" and "metro shoes" beats "metro". None if none match.
+    """
+    text = (text or "").lower()
+    best_category, best_length = None, 0
+    for category, keywords in MERCHANT_CATEGORY_KEYWORDS.items():
+        for kw in keywords:
+            if len(kw) > best_length and re.search(rf"(?<![a-z0-9]){re.escape(kw)}(?:s|es)?(?![a-z0-9])", text):
+                best_category, best_length = category, len(kw)
+    return best_category
 
 
 def merchant_memory_version() -> int:
@@ -209,26 +221,38 @@ def remember_merchant_categories(pairs: List[Tuple[str, str]]) -> None:
         logger.warning("ChromaDB could not remember %d merchants: %r", len(learned), exc)
 
 
+INCOME_WORDS = re.compile(r"\b(?:refund|refunded|received|receive|credited|cashback|cash back|salary)\b", re.IGNORECASE)
+INCOME_NOT_SAVED = (
+    "This looks like money you received, not money you spent, so it was not saved. "
+    "SpendWise only tracks expenses."
+)
+
+
 def parse_natural_language_expense(user_text: str) -> Dict[str, Any]:
     """
     Parse a natural-language expense statement into a structured transaction dictionary.
     Example input: "Spent ₹450 at Swiggy for late night dinner on 01-10-2026"
     """
+    # Extract date first: DD-MM-YYYY (also with / or .), YYYY-MM-DD, or "yesterday" / "today";
+    # default today. It is then removed, so its digits can't be taken as the amount.
+    date_match = re.search(r"\b(\d{1,2}[-/.]\d{1,2}[-/.]\d{4}|\d{4}-\d{2}-\d{2})\b", user_text)
+    text_without_date = user_text
+    if date_match:
+        text_without_date = user_text[: date_match.start()] + " " + user_text[date_match.end():]
+
     # Extract amount. Prefer a number marked as money (₹450, Rs 450, 450 rupees) or after a
     # money word (spent/paid/for 300), so quantities like "2 coffees" aren't taken as the price.
-    number = r"(\d+(?:,\d{3})*(?:\.\d{1,2})?)"
+    number = r"(\d+(?:,\d{2,3})*(?:\.\d{1,2})?)"  # 1,25,000 (Indian) and 125,000 both work
     amount_match = (
-        re.search(r"(?:₹|\brs\.?|\binr)\s*" + number, user_text, re.IGNORECASE)
-        or re.search(number + r"\s*(?:rs\b|rupees\b|inr\b|/-)", user_text, re.IGNORECASE)
-        or re.search(r"\b(?:spent|paid|for|of|worth|cost|costs)\s+" + number, user_text, re.IGNORECASE)
-        or re.search(number, user_text)
+        re.search(r"(?:₹|\brs\.?|\binr)\s*" + number, text_without_date, re.IGNORECASE)
+        or re.search(number + r"\s*(?:rs\b|rupees\b|inr\b|/-)", text_without_date, re.IGNORECASE)
+        or re.search(r"\b(?:spent|paid|for|of|worth|cost|costs)\s+" + number, text_without_date, re.IGNORECASE)
+        or re.search(number, text_without_date)
     )
     amount = float(amount_match.group(1).replace(",", "")) if amount_match else 0.0
 
-    # Extract date: DD-MM-YYYY / YYYY-MM-DD, or the words "yesterday" / "today"; default today
-    date_match = re.search(r"\b(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})\b", user_text)
     if date_match:
-        tx_date = date_match.group(1)
+        tx_date = normalize_date(re.sub(r"[/.]", "-", date_match.group(1)))
     elif re.search(r"\byesterday\b", user_text, re.IGNORECASE):
         tx_date = (datetime.now() - timedelta(days=1)).strftime("%d-%m-%Y")
     else:
@@ -262,4 +286,6 @@ def parse_natural_language_expense(user_text: str) -> Dict[str, Any]:
         "category": category,
         "description": user_text.strip(),
         "source": "Text",
+        # Money coming in (refund, salary...) is not an expense: callers must not save it
+        "looks_like_income": bool(INCOME_WORDS.search(user_text)),
     }

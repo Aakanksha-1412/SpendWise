@@ -48,64 +48,73 @@ def add_transaction(transaction: Dict[str, Any], learn_category: bool = True) ->
     -------
     dict : The newly created transaction record including `id` and `created_at`.
     """
-    init_db()
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    date_str = normalize_date(str(transaction.get("date", "")))
-    merchant = str(transaction.get("merchant", "Unknown Merchant")).strip()
-    amount = float(transaction.get("amount", 0.0))
-    # Accept any spelling case ("food", "FOOD" -> "Food"); unknown names become "Others"
-    category_text = str(transaction.get("category", "Others")).strip().lower()
-    category = next((official for official in CATEGORIES if official.lower() == category_text), "Others")
-    description = str(transaction.get("description", "")).strip()
-    source = str(transaction.get("source", "Text")).strip()
-    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    cursor.execute(
-        """
-        INSERT INTO transactions (user_id, date, merchant, amount, category, description, source, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (current_user_id(), date_str, merchant, amount, category, description, source, created_at),
-    )
-    new_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
+    saved = _insert_transactions([transaction])[0]
 
     # Teach ChromaDB semantic memory this merchant -> category (never blocks saving)
     if learn_category:
-        remember_merchant_category(merchant, category)
-
-    return {
-        "id": new_id,
-        "date": date_str,
-        "merchant": merchant,
-        "amount": amount,
-        "category": category,
-        "description": description,
-        "source": source,
-        "created_at": created_at,
-    }
+        remember_merchant_category(saved["merchant"], saved["category"])
+    return saved
 
 
 def bulk_insert_transactions(transactions: List[Dict[str, Any]]) -> int:
     """
     Insert multiple transactions (e.g., from CSV upload) into SQLite.
-    Returns count of inserted records.
+    All of them are saved, or (if any fails) none. Returns count of inserted records.
     """
-    saved = [add_transaction(tx, learn_category=False) for tx in transactions]
+    saved = _insert_transactions(transactions)
     remember_merchant_categories([(tx["merchant"], tx["category"]) for tx in saved])  # one ChromaDB write
     return len(saved)
+
+
+def _insert_transactions(transactions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Clean and insert rows in ONE database transaction (all or nothing); always closes the connection."""
+    init_db()
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    saved = []
+    conn = get_connection()
+    try:
+        with conn:  # commits at the end, or rolls everything back on an error
+            for transaction in transactions:
+                date_str = normalize_date(str(transaction.get("date", "")))
+                merchant = str(transaction.get("merchant", "Unknown Merchant")).strip()
+                amount = float(transaction.get("amount", 0.0))
+                # Accept any spelling case ("food", "FOOD" -> "Food"); unknown names become "Others"
+                category_text = str(transaction.get("category", "Others")).strip().lower()
+                category = next((official for official in CATEGORIES if official.lower() == category_text), "Others")
+                description = str(transaction.get("description", "")).strip()
+                source = str(transaction.get("source", "Text")).strip()
+                cursor = conn.execute(
+                    """
+                    INSERT INTO transactions (user_id, date, merchant, amount, category, description, source, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (current_user_id(), date_str, merchant, amount, category, description, source, created_at),
+                )
+                saved.append({
+                    "id": cursor.lastrowid,
+                    "date": date_str,
+                    "merchant": merchant,
+                    "amount": amount,
+                    "category": category,
+                    "description": description,
+                    "source": source,
+                    "created_at": created_at,
+                })
+    finally:
+        conn.close()
+    return saved
 
 
 def get_transactions(
     category: Optional[str] = None,
     merchant_query: Optional[str] = None,
     date_filter: Optional[str] = None,
+    month: Optional[int] = None,
+    year: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Retrieve transactions from SQLite with optional filters for category, merchant, and date.
+    Retrieve transactions from SQLite with optional filters for category, merchant, date,
+    and month (month + year together). Newest entry first.
     """
     init_db()
     conn = get_connection()
@@ -130,11 +139,79 @@ def get_transactions(
         query += " AND date = ?"
         params.append(normalized)
 
+    if month and year:
+        query += " AND substr(date, 4, 7) = ?"  # DD-MM-YYYY -> "MM-YYYY"
+        params.append(f"{int(month):02d}-{int(year)}")
+
     query += " ORDER BY id DESC"
     cursor.execute(query, params)
     rows = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return rows
+
+
+def get_transaction_months() -> List[tuple]:
+    """(month, year) pairs that have expenses, newest first (unreadable dates are skipped)."""
+    months = set()
+    for row in get_transactions():
+        try:
+            parsed = datetime.strptime(row["date"], "%d-%m-%Y")
+        except ValueError:
+            continue
+        months.add((parsed.month, parsed.year))
+    return sorted(months, key=lambda m: (m[1], m[0]), reverse=True)
+
+
+def update_transaction(transaction_id: int, changes: Dict[str, Any]) -> bool:
+    """
+    Change one of THIS user's expenses (date, merchant, amount, category, description).
+    Returns False if it doesn't exist or belongs to someone else.
+    """
+    allowed = {key: changes[key] for key in ("date", "merchant", "amount", "category", "description") if key in changes}
+    if "date" in allowed:
+        allowed["date"] = normalize_date(str(allowed["date"]))
+    if "category" in allowed:
+        category_text = str(allowed["category"]).strip().lower()
+        allowed["category"] = next((c for c in CATEGORIES if c.lower() == category_text), "Others")
+    if not allowed:
+        return False
+    init_db()
+    conn = get_connection()
+    try:
+        with conn:
+            cursor = conn.execute(
+                f"UPDATE transactions SET {', '.join(f'{key} = ?' for key in allowed)} WHERE id = ? AND user_id = ?",
+                (*allowed.values(), int(transaction_id), current_user_id()),
+            )
+    finally:
+        conn.close()
+    return cursor.rowcount == 1
+
+
+def delete_transaction(transaction_id: int) -> bool:
+    """Delete one of THIS user's expenses. Returns False if it doesn't exist or isn't theirs."""
+    init_db()
+    conn = get_connection()
+    try:
+        with conn:
+            cursor = conn.execute(
+                "DELETE FROM transactions WHERE id = ? AND user_id = ?", (int(transaction_id), current_user_id())
+            )
+    finally:
+        conn.close()
+    return cursor.rowcount == 1
+
+
+def expense_already_saved(date: str, merchant: str, amount: float) -> bool:
+    """True if this user already has an expense with the same date, merchant (any case) and amount."""
+    init_db()
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT 1 FROM transactions WHERE user_id = ? AND date = ? AND LOWER(TRIM(merchant)) = ? AND ROUND(amount, 2) = ?",
+        (current_user_id(), normalize_date(date), merchant.strip().lower(), round(float(amount), 2)),
+    ).fetchone()
+    conn.close()
+    return row is not None
 
 
 def get_transactions_df() -> Any:

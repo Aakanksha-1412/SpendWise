@@ -162,7 +162,10 @@ def _extract_with_tesseract(image_bytes: bytes) -> Optional[Dict[str, Any]]:
     return fields
 
 
-_AMOUNT = r"(?:₹|rs\.?|inr)?\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)"
+# 1,25,000 (Indian) and 125,000 both work; "2.5%" is a rate, not an amount
+_AMOUNT = r"(?:₹|rs\.?|inr)?\s*(\d+(?:,\d{2,3})*(?:\.\d{1,2})?)(?![\d.]*\s*%)"
+# Heading lines that are not the shop's name
+_HEADER_LINE = r"(tax\s+invoice|retail\s+invoice|invoice|bill|receipt|cash\s+memo|original|duplicate|welcome\b.*)\W*"
 
 
 def parse_receipt_text(raw_text: str) -> Optional[Dict[str, Any]]:
@@ -177,7 +180,10 @@ def parse_receipt_text(raw_text: str) -> Optional[Dict[str, Any]]:
     if not lines:
         return None
 
-    merchant = next((line for line in lines if re.search(r"[A-Za-z]{3,}", line)), "Unknown Merchant")
+    merchant = next(
+        (line for line in lines if re.search(r"[A-Za-z]{3,}", line) and not re.fullmatch(_HEADER_LINE, line.lower())),
+        "Unknown Merchant",
+    )
 
     date_pattern = r"\b(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}|\d{4}-\d{2}-\d{2})\b"
     date_match = re.search(date_pattern, raw_text)
@@ -185,12 +191,25 @@ def parse_receipt_text(raw_text: str) -> Optional[Dict[str, Any]]:
 
     total = None
     grand_total = None
+    paid_total = None  # "Amount Paid": only used when there is no real total line
     tax = 0.0
     items = []
     for line in lines:
         lower = line.lower()
         amounts = re.findall(_AMOUNT, line, re.IGNORECASE)
-        is_total_line = "total" in lower or re.search(r"\b(amount\s+(payable|due|paid)|net\s+(amount|payable)|to\s+pay)\b", lower)
+        is_tax_line = re.search(r"\b(gst|cgst|sgst|igst|vat|tax)\b", lower) and "incl" not in lower
+        # Cash handed over and change given back are not the bill
+        if re.search(r"\b(change|tendered|cash)\b", lower) and "total" not in lower:
+            continue
+        if re.search(r"\bpaid\b", lower) and not re.search(r"\b(grand|net)\b", lower):
+            if amounts:
+                paid_total = float(amounts[-1].replace(",", ""))
+            continue
+        # "Total GST 26.20" / "Total Tax" is tax, not the bill total
+        if "total" in lower and is_tax_line and amounts:
+            tax += float(amounts[-1].replace(",", ""))
+            continue
+        is_total_line = "total" in lower or re.search(r"\b(amount\s+(payable|due)|net\s+(amount|payable)|to\s+pay)\b", lower)
         if is_total_line and amounts:
             # "Sub Total", "Total Qty: 3", "Total Items", "Total Savings" are not the amount paid
             if "sub" in lower or re.search(r"total\s*(qty|quantity|items?|savings?|saved|discount)", lower):
@@ -205,12 +224,14 @@ def parse_receipt_text(raw_text: str) -> Optional[Dict[str, Any]]:
         if not amounts:
             continue
         value = float(amounts[-1].replace(",", ""))
-        if re.search(r"\b(gst|cgst|sgst|igst|vat|tax)\b", lower):
+        if is_tax_line:
             tax += value
         elif "sub" not in lower and re.search(r"[A-Za-z]{3,}", line) and line != merchant:
             items.append({"name": re.sub(_AMOUNT + r"\s*$", "", line, flags=re.IGNORECASE).strip(" .:-x"), "price": value})
 
     total = grand_total if grand_total is not None else total
+    if total is None:
+        total = paid_total
     if total is None:
         return None
     return {"merchant": merchant, "date": receipt_date, "items": items, "tax": tax, "total": total, "raw_text": raw_text}

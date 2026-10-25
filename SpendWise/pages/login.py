@@ -12,13 +12,17 @@ Responsibility:
 
 import streamlit as st
 
-from tools.auth_tool import create_user, has_unowned_data, unowned_data_summary, verify_user
+from tools.auth_tool import create_login_token, create_user, has_unowned_data, unowned_data_summary, verify_user
 from utils.helpers import get_setting
 
 
 def _log_in(user_id: int, username: str) -> None:
     st.session_state["user_id"] = user_id
     st.session_state["username"] = username.strip()
+    # "Stay logged in" after a page refresh: app.py stores this key in a browser cookie
+    token = create_login_token(user_id)
+    st.session_state["login_token"] = token
+    st.session_state["write_login_cookie"] = token
     st.rerun()
 
 

@@ -55,15 +55,23 @@ CATEGORY_COLORS: Dict[str, str] = {
 
 def format_inr(amount: float, include_sign: bool = False) -> str:
     """
-    Format a numeric value in Indian Rupee (₹) notation with comma separators.
-    Example: 6100 -> '₹6,100' | -2100 -> '-₹2,100'
+    Format a numeric value in Indian Rupee (₹) notation with Indian digit grouping
+    (last three digits, then groups of two).
+    Example: 6100 -> '₹6,100' | 200000 -> '₹2,00,000' | -2100 -> '-₹2,100'
     """
     is_negative = amount < 0
     abs_val = abs(round(float(amount), 2))
-    if abs_val.is_integer():
-        formatted = f"{int(abs_val):,}"
-    else:
-        formatted = f"{abs_val:,.2f}"
+    rupees, paise = f"{abs_val:.2f}".split(".")
+    head, last_three = rupees[:-3], rupees[-3:]
+    groups = []
+    while len(head) > 2:
+        groups.insert(0, head[-2:])
+        head = head[:-2]
+    if head:
+        groups.insert(0, head)
+    formatted = ",".join(groups + [last_three])
+    if not abs_val.is_integer():
+        formatted += f".{paise}"
 
     if is_negative:
         return f"-₹{formatted}"
@@ -72,14 +80,24 @@ def format_inr(amount: float, include_sign: bool = False) -> str:
     return f"₹{formatted}"
 
 
+# Date formats SpendWise understands, including those in Indian bank exports
+# ("25 Oct 2026", "25-Oct-2026", "25/10/26"). Four-digit years are tried first.
+DATE_FORMATS = (
+    "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d",
+    "%d %b %Y", "%d-%b-%Y", "%d %B %Y", "%d-%B-%Y",
+    "%d/%m/%y", "%d-%m-%y", "%d %b %y", "%d-%b-%y",
+)
+
+
 def normalize_date(date_str: str) -> str:
     """
-    Normalize input dates (YYYY-MM-DD or DD-MM-YYYY) into standard DD-MM-YYYY display format.
+    Normalize input dates (DD-MM-YYYY, YYYY-MM-DD, 25 Oct 2026, 25/10/26, ...) into
+    standard DD-MM-YYYY display format.
     """
     if not date_str:
         return datetime.now().strftime("%d-%m-%Y")
 
-    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
+    for fmt in DATE_FORMATS:
         try:
             dt = datetime.strptime(date_str.strip(), fmt)
             return dt.strftime("%d-%m-%Y")
@@ -92,7 +110,7 @@ def to_iso_date(date_str: str) -> str:
     """
     Convert DD-MM-YYYY or YYYY-MM-DD into ISO YYYY-MM-DD for chronological sorting and Pandas filtering.
     """
-    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
+    for fmt in DATE_FORMATS:
         try:
             dt = datetime.strptime(date_str.strip(), fmt)
             return dt.strftime("%Y-%m-%d")
@@ -159,6 +177,22 @@ def _env_file_values(path: str, modified_time: float) -> Dict[str, Optional[str]
     except ImportError:
         return {}
     return dotenv_values(path) if modified_time else {}
+
+
+def expense_date_error(date_str: str) -> Optional[str]:
+    """
+    An expense date must be a real calendar date, today or earlier (empty = today).
+    Returns the message to show when it isn't, otherwise None.
+    """
+    normalized = normalize_date(date_str or "")
+    try:
+        parsed = datetime.strptime(normalized, "%d-%m-%Y").date()
+    except ValueError:
+        example = datetime.now().strftime("%d-%m-%Y")
+        return f'"{(date_str or "").strip()}" is not a real date. Please write the date as DD-MM-YYYY, for example {example}.'
+    if parsed > datetime.now().date():
+        return f"The date {normalized} is in the future. Please use today's date or an earlier one."
+    return None
 
 
 def is_in_current_month(date_str: str) -> bool:

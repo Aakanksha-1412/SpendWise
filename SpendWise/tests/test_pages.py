@@ -80,6 +80,20 @@ def test_home_shows_income_and_savings_after_setup():
     assert not any("demo numbers" in i.value for i in app.info)
 
 
+def test_home_cards_do_not_show_money_the_user_does_not_have():
+    from tools.database_tool import remove_all_data, save_profile, upsert_budget
+
+    save_profile(200000, 50000, {})
+    remove_all_data()
+    upsert_budget("Education", 450000)  # saved before budgets were limited to the income
+
+    app = AppTest.from_file(str(PAGES / "home.py"), default_timeout=60).run()
+
+    text = " ".join(m.value for m in app.markdown)
+    assert "₹1,50,000</div>" in text and "Left to spend this month" in text
+    assert "More than you can plan (₹1,50,000)" in text
+
+
 def test_profile_edit_has_only_income_and_savings_and_keeps_budgets():
     from tools.database_tool import get_all_budgets, get_profile, remove_all_data, save_profile, upsert_budget
 
@@ -107,4 +121,237 @@ def test_budget_page_warns_when_budgets_are_more_than_income_minus_savings():
 
     app = AppTest.from_file(str(PAGES / "budget.py"), default_timeout=60).run()
 
-    assert any("₹2,000 more" in w.value for w in app.warning)
+    assert any("Please reduce them by ₹2,000" in w.value for w in app.warning)
+
+
+def test_budget_page_refuses_budgets_more_than_income_minus_savings():
+    from tools.database_tool import get_all_budgets, remove_all_data, save_profile
+
+    save_profile(10000, 3000, {})
+    remove_all_data()
+
+    app = AppTest.from_file(str(PAGES / "budget.py"), default_timeout=60).run()
+    _budget_input(app, "Food").set_value(5000.0)
+    _budget_input(app, "Shopping").set_value(4000.0)  # 9,000 > 7,000 allowed
+    next(b for b in app.button if b.label == "Save Monthly Budgets").click().run()
+
+    assert any("you can only plan ₹7,000" in e.value for e in app.error)
+    assert sum(get_all_budgets().values()) == 0  # nothing saved
+
+
+def test_budget_page_saves_budgets_that_fit():
+    from tools.database_tool import get_all_budgets, remove_all_data, save_profile
+
+    save_profile(10000, 3000, {})
+    remove_all_data()
+
+    app = AppTest.from_file(str(PAGES / "budget.py"), default_timeout=60).run()
+    _budget_input(app, "Food").set_value(4000.0)
+    _budget_input(app, "Shopping").set_value(3000.0)  # exactly 7,000 is allowed
+    next(b for b in app.button if b.label == "Save Monthly Budgets").click().run()
+
+    assert not app.error
+    assert get_all_budgets()["Food"] == 4000.0 and get_all_budgets()["Shopping"] == 3000.0
+
+
+def test_first_setup_refuses_budgets_more_than_income():
+    from tools.database_tool import get_profile
+
+    app = AppTest.from_file(str(PAGES / "profile.py"), default_timeout=60).run()
+    app.number_input(key="profile_income").set_value(200000.0)
+    app.number_input(key="profile_savings").set_value(50000.0)
+    app.number_input(key="setup_budget_Education").set_value(450000.0)
+    next(b for b in app.button if b.label == "Save & create my budgets").click().run()
+
+    assert any("Please reduce them by ₹3,00,000" in e.value for e in app.error)
+    assert get_profile() is None  # nothing saved
+
+
+def test_profile_edit_refuses_income_too_small_for_the_budgets():
+    from tools.database_tool import get_profile, remove_all_data, save_profile, upsert_budget
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+    upsert_budget("Food", 15000)
+
+    app = AppTest.from_file(str(PAGES / "profile.py"), default_timeout=60).run()
+    app.number_input(key="profile_income").set_value(10000.0)
+    next(b for b in app.button if b.label == "Save").click().run()
+
+    assert any("you can only plan ₹8,000" in e.value for e in app.error)
+    assert get_profile()["monthly_income"] == 20000.0  # unchanged
+
+
+def _budget_input(app, category):
+    return next(n for n in app.number_input if n.label == f"{category} Budget (₹)")
+
+
+def test_typed_expense_with_a_future_date_is_not_saved():
+    from datetime import date, timedelta
+    from tools.database_tool import get_transactions, remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+    tomorrow = (date.today() + timedelta(days=1)).strftime("%d-%m-%Y")
+
+    app = AppTest.from_file(str(PAGES / "transactions.py"), default_timeout=60).run()
+    app.text_input[0].set_value(f"Spent ₹450 at Swiggy on {tomorrow}")
+    next(b for b in app.button if b.label == "Parse & Add").click().run()
+
+    assert any("This expense was not saved." in e.value for e in app.error)
+    assert get_transactions() == []
+
+
+def test_typed_expense_with_an_impossible_date_is_not_saved():
+    from tools.database_tool import get_transactions, remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+
+    app = AppTest.from_file(str(PAGES / "transactions.py"), default_timeout=60).run()
+    app.text_input[0].set_value("Spent ₹500 at Swiggy on 31-02-2026")
+    next(b for b in app.button if b.label == "Parse & Add").click().run()
+
+    assert any('"31-02-2026" is not a real date' in e.value for e in app.error)
+    assert get_transactions() == []
+
+
+def test_typed_refund_is_not_saved_as_an_expense():
+    from tools.database_tool import get_transactions, remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+
+    app = AppTest.from_file(str(PAGES / "transactions.py"), default_timeout=60).run()
+    app.text_input[0].set_value("Got refund of 500 from Amazon")
+    next(b for b in app.button if b.label == "Parse & Add").click().run()
+
+    assert any("This looks like money you received" in w.value for w in app.warning)
+    assert get_transactions() == []
+
+
+def _demo_receipt_form():
+    from tools.database_tool import remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+    app = AppTest.from_file(str(PAGES / "upload.py"), default_timeout=60).run()
+    next(b for b in app.button if b.label.startswith("Run Demo Receipt")).click().run()
+    return app
+
+
+def _save_receipt(app):
+    next(b for b in app.button if b.label == "Save Extracted Receipt to SQLite").click().run()
+
+
+def test_receipt_needs_a_shop_name_and_a_total_above_zero():
+    from tools.database_tool import get_transactions
+
+    app = _demo_receipt_form()
+    next(t for t in app.text_input if t.label == "Merchant").set_value("  ")
+    _save_receipt(app)
+    assert any("Please enter the shop name." in e.value for e in app.error)
+
+    next(t for t in app.text_input if t.label == "Merchant").set_value("Starbucks")
+    next(n for n in app.number_input if n.label == "Extracted Total (₹)").set_value(0.0)
+    _save_receipt(app)
+    assert any("Please enter the bill total (more than ₹0)." in e.value for e in app.error)
+    assert get_transactions() == []
+
+
+def test_the_same_receipt_is_not_saved_twice_unless_the_user_says_so():
+    from tools.database_tool import get_transactions
+
+    app = _demo_receipt_form()
+    _save_receipt(app)
+    assert len(get_transactions()) == 1
+
+    next(b for b in app.button if b.label.startswith("Run Demo Receipt")).click().run()
+    _save_receipt(app)
+    assert any("so it was not saved again" in w.value for w in app.warning)
+    assert len(get_transactions()) == 1
+
+    next(c for c in app.checkbox if c.label.startswith("This is a different purchase")).check()
+    _save_receipt(app)
+    assert len(get_transactions()) == 2
+
+
+def _ledger_with_two_months():
+    from datetime import date, timedelta
+    from tools.database_tool import add_transaction, remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+    today = date.today()
+    last_month = (today.replace(day=1) - timedelta(days=1)).replace(day=5)
+    add_transaction({"merchant": "Swiggy", "amount": 450, "category": "Food", "date": today.strftime("%d-%m-%Y")})
+    add_transaction({"merchant": "Zomato", "amount": 6000, "category": "Food", "date": last_month.strftime("%d-%m-%Y")})
+
+
+def test_transactions_total_is_for_this_month_by_default():
+    _ledger_with_two_months()
+
+    app = AppTest.from_file(str(PAGES / "transactions.py"), default_timeout=60).run()
+
+    text = " ".join(m.value for m in app.markdown)
+    assert "Showing 1 transaction(s)" in text and "₹450" in text
+    month = next(s for s in app.selectbox if s.label == "Month")
+    month.select_index(len(month.options) - 1).run()  # "All months"
+    text = " ".join(m.value for m in app.markdown)
+    assert "Total for all months: **₹6,450**" in text
+
+
+def test_added_message_is_shown_after_the_page_reloads():
+    from tools.database_tool import remove_all_data, save_profile
+
+    save_profile(20000, 2000, {})
+    remove_all_data()
+
+    app = AppTest.from_file(str(PAGES / "transactions.py"), default_timeout=60).run()
+    app.text_input[0].set_value("Spent ₹450 at Swiggy")
+    next(b for b in app.button if b.label == "Parse & Add").click().run()
+
+    assert any("Added: Swiggy — ₹450" in s.value for s in app.success)
+
+
+def test_an_expense_can_be_edited_and_deleted():
+    from tools.database_tool import get_transactions
+
+    _ledger_with_two_months()
+    app = AppTest.from_file(str(PAGES / "transactions.py"), default_timeout=60).run()
+    chooser = next(s for s in app.selectbox if s.label == "Choose an expense")
+    chooser.set_value(get_transactions(merchant_query="swiggy")[0]).run()
+
+    next(t for t in app.text_input if t.label == "Merchant" and t.value == "Swiggy").set_value("Swiggy Instamart")
+    next(n for n in app.number_input if n.label == "Amount (₹)" and n.value == 450.0).set_value(500.0)
+    next(b for b in app.button if b.label == "Save changes").click().run()
+
+    edited = get_transactions(merchant_query="instamart")[0]
+    assert edited["amount"] == 500.0
+    assert any("Updated: Swiggy Instamart — ₹500" in s.value for s in app.success)
+
+    chooser = next(s for s in app.selectbox if s.label == "Choose an expense")
+    chooser.set_value(edited).run()
+    next(b for b in app.button if b.label == "Delete expense").click().run()
+    assert any("Tick" in w.value for w in app.warning)  # needs the confirmation tick
+    assert get_transactions(merchant_query="instamart")
+
+    next(c for c in app.checkbox if c.label.startswith("Yes, delete")).check()
+    next(b for b in app.button if b.label == "Delete expense").click().run()
+    assert get_transactions(merchant_query="instamart") == []
+
+
+def test_one_user_cannot_change_another_users_expense():
+    import database.database as database
+    from tools.database_tool import add_transaction, delete_transaction, get_transactions, update_transaction
+
+    database.set_current_user(1)
+    mine = add_transaction({"merchant": "Swiggy", "amount": 450, "category": "Food", "date": ""})
+    database.set_current_user(2)
+    try:
+        assert update_transaction(mine["id"], {"amount": 1}) is False
+        assert delete_transaction(mine["id"]) is False
+    finally:
+        database.set_current_user(1)
+    assert get_transactions()[0]["amount"] == 450.0
+    database.set_current_user(None)

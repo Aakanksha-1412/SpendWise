@@ -105,3 +105,41 @@ def test_settings_can_come_from_streamlit_secrets(monkeypatch):
     monkeypatch.setattr(helpers, "_streamlit_secret", lambda name: "from-secrets" if name == "GEMINI_MODEL" else None)
 
     assert helpers.get_setting("GEMINI_MODEL") == "from-secrets"
+
+
+def test_logging_in_creates_a_login_key_and_logging_out_cancels_it():
+    from tools.auth_tool import user_for_login_token
+
+    create_user("meera", "secret789")
+    app = AppTest.from_file(APP, default_timeout=60).run()
+    app.text_input(key="login_username").input("meera")
+    app.text_input(key="login_password").input("secret789")
+    _button(app, "Log in").click().run()
+
+    token = app.session_state["login_token"]
+    assert user_for_login_token(token)[1] == "meera"  # a refresh would log back in with it
+
+    _button(app, "Log out").click().run()
+
+    assert user_for_login_token(token) is None  # the browser's key no longer works
+
+
+def test_login_keys_are_random_hashed_and_expire():
+    from freezegun import freeze_time
+    import database.database as database
+    from tools.auth_tool import create_login_token, user_for_login_token
+
+    ok, user_id = create_user("kiran", "secret000")
+    with freeze_time("2026-10-25 10:00:00"):
+        token = create_login_token(user_id)
+    assert token != create_login_token(user_id)
+    conn = database.get_connection()
+    stored = [row[0] for row in conn.execute("SELECT token_hash FROM login_sessions")]
+    conn.close()
+    assert token not in stored  # only the hash is kept
+
+    with freeze_time("2026-10-31 10:00:00"):
+        assert user_for_login_token(token) == (user_id, "kiran")
+    with freeze_time("2026-11-02 10:00:01"):
+        assert user_for_login_token(token) is None  # 7 days later
+    assert user_for_login_token("made-up") is None

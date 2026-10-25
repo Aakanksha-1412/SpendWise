@@ -51,3 +51,47 @@ def test_overview_matches_each_single_category_status():
 
     for category, status in overview.items():
         assert status == calculate_budget_status(category)
+
+
+def _fresh_user():
+    from tools.database_tool import remove_all_data, save_profile
+
+    database.init_db()
+    save_profile(20000, 0, {})
+    remove_all_data()
+
+
+def test_nothing_last_week_has_no_percentage():
+    with freeze_time("2027-01-20"):
+        _fresh_user()
+        add_transaction({"merchant": "Swiggy", "amount": 200, "category": "Food", "date": "01-01-2027"})  # older history
+        add_transaction({"merchant": "Swiggy", "amount": 3000, "category": "Food", "date": "18-01-2027"})  # this week
+
+        spike = detect_spending_spike("Food")
+
+    assert spike["increase_pct"] is None and spike["change_label"] == "new"
+    assert spike["spike_detected"] is True
+    assert spike["message"] == "New Food spending of ₹3,000 this week (nothing in the previous week)."
+
+
+def test_a_brand_new_category_is_not_called_a_spike():
+    with freeze_time("2027-01-20"):
+        _fresh_user()
+        add_transaction({"merchant": "Myntra", "amount": 3000, "category": "Shopping", "date": "18-01-2027"})
+
+        spike = detect_spending_spike("Shopping")
+
+    assert spike["spike_detected"] is False
+    assert "Not enough Shopping history yet" in spike["message"]
+
+
+def test_small_jumps_from_a_tiny_amount_follow_the_same_rupee_rule():
+    with freeze_time("2027-01-20"):
+        _fresh_user()
+        add_transaction({"merchant": "Chai", "amount": 10, "category": "Food", "date": "10-01-2027"})
+        add_transaction({"merchant": "Chai", "amount": 250, "category": "Food", "date": "18-01-2027"})
+
+        spike = detect_spending_spike("Food")
+
+    assert spike["change_label"] == "+2400.0%"
+    assert spike["spike_detected"] is False  # only ₹240 more: below the ₹300 rule

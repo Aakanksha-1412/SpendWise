@@ -49,3 +49,38 @@ def test_category_spelling_from_a_csv_is_accepted_in_any_case():
     bulk_insert_transactions([{"date": "", "merchant": "Swiggy", "amount": 200, "category": "food", "description": ""}])
 
     assert get_transactions(merchant_query="swiggy")[0]["category"] == "Food"
+
+
+def test_amounts_use_indian_digit_grouping():
+    from utils.helpers import format_inr
+
+    assert format_inr(0) == "₹0"
+    assert format_inr(999) == "₹999"
+    assert format_inr(4500) == "₹4,500"
+    assert format_inr(200000) == "₹2,00,000"
+    assert format_inr(547500) == "₹5,47,500"
+    assert format_inr(1250000) == "₹12,50,000"
+    assert format_inr(123456789) == "₹12,34,56,789"
+    assert format_inr(1234.5) == "₹1,234.50"
+    assert format_inr(-397500) == "-₹3,97,500"
+    assert format_inr(2100, include_sign=True) == "+₹2,100"
+
+
+def test_only_today_or_earlier_is_a_valid_expense_date():
+    from datetime import date, timedelta
+    from utils.helpers import expense_date_error
+
+    tomorrow = (date.today() + timedelta(days=1)).strftime("%d-%m-%Y")
+
+    assert expense_date_error(date.today().strftime("%d-%m-%Y")) is None
+    assert expense_date_error("01-01-2020") is None
+    assert expense_date_error("") is None  # empty means today
+    assert expense_date_error(tomorrow) == f"The date {tomorrow} is in the future. Please use today's date or an earlier one."
+
+
+def test_impossible_dates_are_not_valid_expense_dates():
+    from utils.helpers import expense_date_error
+
+    assert expense_date_error("31-02-2026").startswith('"31-02-2026" is not a real date. Please write the date as DD-MM-YYYY')
+    assert "is not a real date" in expense_date_error("10-13-2026")  # month written first
+    assert "is not a real date" in expense_date_error("hello")

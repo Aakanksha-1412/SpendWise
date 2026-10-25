@@ -24,17 +24,18 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.tools import tool
 
-from analytics.analytics import get_summary_metrics
+from analytics.analytics import check_spend_against_savings, get_summary_metrics
 from tools.budget_tool import (
     calculate_budget_status,
+    check_budgets_fit,
     get_all_budget_statuses,
     suggest_discretionary_reallocation,
 )
 from tools.categorization_tool import categorize_expense
-from tools.database_tool import add_transaction, get_profile, get_transactions, save_profile, upsert_budget
+from tools.database_tool import add_transaction, get_all_budgets, get_profile, get_transactions, save_profile, upsert_budget
 from tools.ocr_tool import extract_receipt
 from tools.spike_detector import detect_all_category_spikes, detect_spending_spike
-from utils.helpers import CATEGORIES, normalize_date, to_iso_date
+from utils.helpers import CATEGORIES, expense_date_error, normalize_date, to_iso_date
 
 # ------------------------------------------------------------------------------
 # Receipt hand-off
@@ -153,8 +154,9 @@ def search_transactions(
 @tool
 def check_affordability(category: str, amount: float) -> Dict[str, Any]:
     """Check whether a NEW planned expense of `amount` rupees in `category` fits within
-    the remaining budget. Returns the current remaining budget and what would be left after.
-    Use for "can I afford ₹500 on food?" or "is 500 rs on pizza ok?"."""
+    the remaining budget AND still keeps the user's monthly savings goal. Returns the current
+    remaining budget and what would be left after. If the result has `answer`, tell the user
+    that answer. Use for "can I afford ₹500 on food?" or "is 500 rs on pizza ok?"."""
     official, error = _match_category(category)
     if error:
         return error
@@ -163,6 +165,19 @@ def check_affordability(category: str, amount: float) -> Dict[str, Any]:
     # Simple deterministic maths so the LLM never has to calculate.
     # (Could move into tools/budget_tool.py later — ask Member 3.)
     status = calculate_budget_status(official)
+    # The savings goal comes first: a category budget can't make spending affordable
+    # if it would cut into the savings goal.
+    savings = check_spend_against_savings(amount)
+    if savings and not savings["fits"]:
+        return {
+            "category": status["category"],
+            "planned_amount": amount,
+            "can_afford": False,
+            "savings_goal_at_risk": True,
+            "left_to_spend_this_month": savings["left_to_spend"],
+            "savings_goal": savings["savings_goal"],
+            "answer": savings["message"],
+        }
     if status["status"] == "NO BUDGET SET":
         return {
             "category": status["category"],
@@ -222,6 +237,9 @@ def add_expense(
             datetime.strptime(date, "%d-%m-%Y")
         except ValueError:
             return {"error": f"Could not read date '{date}'. Use DD-MM-YYYY (today is in your instructions).", "saved": False}
+        date_problem = expense_date_error(date)
+        if date_problem:
+            return {"error": f"This expense was not saved. {date_problem}", "saved": False}
 
     saved = add_transaction(
         {
@@ -268,6 +286,11 @@ def set_budget(category: str, amount: float) -> Dict[str, Any]:
         return {**error, "saved": False}
     if amount < 0:
         return {"error": "A budget can't be negative.", "saved": False}
+    profile = get_profile()
+    if profile:
+        too_much = check_budgets_fit({**get_all_budgets(), official: amount}, profile["monthly_income"], profile["savings_goal"])
+        if too_much:
+            return {"error": f"This budget was not saved. {too_much}", "saved": False}
     upsert_budget(official, amount)
     return {"saved": True, "budget_status": calculate_budget_status(official)}
 
@@ -284,6 +307,9 @@ def update_my_profile(monthly_income: Optional[float] = None, savings_goal: Opti
         return {"error": "Ask the user for their monthly income (more than 0).", "saved": False}
     if goal < 0 or goal > income:
         return {"error": "The savings goal must be between 0 and the monthly income.", "saved": False}
+    too_much = check_budgets_fit(get_all_budgets(), income, goal)
+    if too_much:
+        return {"error": f"This change was not saved. {too_much} Ask the user to reduce their budgets first.", "saved": False}
     save_profile(income, goal, profile["usual_spending"] if profile else {})
     return {"saved": True, "monthly_income": income, "savings_goal": goal, "savings_now": _savings_check()}
 

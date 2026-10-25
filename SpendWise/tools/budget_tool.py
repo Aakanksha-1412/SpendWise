@@ -123,6 +123,22 @@ def suggest_discretionary_reallocation(month: Optional[int] = None, year: Option
     }
 
 
+def check_budgets_fit(budgets: Dict[str, float], monthly_income: float, savings_goal: float) -> Optional[str]:
+    """
+    All budgets together may not be more than income - savings goal (no budgeting money
+    the user doesn't have). Returns None when they fit, otherwise the message to show.
+    """
+    allowed = round(float(monthly_income) - float(savings_goal), 2)
+    total = round(sum(float(amount or 0.0) for amount in budgets.values()), 2)
+    if total <= allowed:
+        return None
+    return (
+        f"Your budgets add up to {format_inr(total)}, but you can only plan {format_inr(allowed)}: "
+        f"your {format_inr(monthly_income)} income minus your {format_inr(savings_goal)} savings goal. "
+        f"Please reduce them by {format_inr(total - allowed)}."
+    )
+
+
 # Starting shares used only when the user gave no usual spending at all
 DEFAULT_BUDGET_SHARES: Dict[str, float] = {
     "Food": 5000, "Transport": 3000, "Shopping": 4000, "Entertainment": 2000,

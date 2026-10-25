@@ -95,3 +95,44 @@ def test_yesterday_and_today_are_understood():
     with freeze_time("2026-11-01"):
         assert parse_natural_language_expense("spent 450 on Swiggy yesterday")["date"] == "31-10-2026"
         assert parse_natural_language_expense("spent 450 on Swiggy today")["date"] == "01-11-2026"
+
+
+def test_typed_entry_reads_dates_and_amounts_correctly():
+    from tools.categorization_tool import parse_natural_language_expense as parse
+
+    assert parse("Swiggy dinner on 01-10-2026")["amount"] == 0.0  # the date is not the amount
+    assert parse("Spent ₹1,25,000 at Croma for a laptop")["amount"] == 125000.0  # Indian commas
+    assert parse("Spent ₹125,000 at Croma")["amount"] == 125000.0  # Western commas still work
+    slash = parse("Spent 300 at Uber on 25/09/2026")
+    assert slash["date"] == "25-09-2026" and slash["amount"] == 300.0
+    assert parse("Spent 450 at Swiggy on 01-10-2026")["amount"] == 450.0
+
+
+def test_money_received_is_recognised():
+    from tools.categorization_tool import parse_natural_language_expense as parse
+
+    assert parse("Got refund of 500 from Amazon")["looks_like_income"] is True
+    assert parse("Received 2000 from Rahul")["looks_like_income"] is True
+    assert parse("Salary credited 50000")["looks_like_income"] is True
+    assert parse("Spent 450 at Swiggy")["looks_like_income"] is False
+
+
+def test_keywords_only_match_whole_words():
+    from tools.categorization_tool import categorize_expense
+
+    assert categorize_expense("Apollo Pharmacy", "Multivitamin Tablets", use_semantic=False) == "Healthcare"
+    assert categorize_expense("Vishal Mega Mart", use_semantic=False) == "Others"  # not "vi" -> Bills
+    assert categorize_expense("Torrent Pharma", use_semantic=False) == "Others"  # not "rent" -> Bills
+    assert categorize_expense("Coca Cola", use_semantic=False) == "Others"  # not "ola" -> Transport
+    assert categorize_expense("Python Training", use_semantic=False) == "Others"  # not "train"
+    assert categorize_expense("Vi", "prepaid recharge", use_semantic=False) == "Bills"
+    assert categorize_expense("H&M", use_semantic=False) == "Shopping"
+
+
+def test_the_shop_name_and_the_most_specific_keyword_win():
+    from tools.categorization_tool import categorize_expense
+
+    assert categorize_expense("Metro Shoes", use_semantic=False) == "Shopping"
+    assert categorize_expense("Delhi Metro", use_semantic=False) == "Transport"
+    assert categorize_expense("Croma", "dinner snacks", use_semantic=False) == "Shopping"  # shop name decides
+    assert categorize_expense("Local Store", "2 pizzas", use_semantic=False) == "Food"  # plural still matches

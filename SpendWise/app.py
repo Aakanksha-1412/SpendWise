@@ -21,8 +21,10 @@ Responsibility:
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 from utils.helpers import period_label
 from database.database import init_db, set_current_user
+from tools.auth_tool import LOGIN_COOKIE, LOGIN_DAYS, delete_login_token, user_for_login_token
 from tools.database_tool import get_profile, get_transactions
 
 # Ensure SQLite tables and initial demo records exist before rendering any page
@@ -122,10 +124,35 @@ st.markdown(
 # -----------------------------------------------------------------------------
 # LOGIN GATE: nobody sees any data before logging in
 # -----------------------------------------------------------------------------
+def _set_login_cookie(token: str, days: int) -> None:
+    """Write (days > 0) or remove (days = 0) the "stay logged in" cookie in the browser."""
+    components.html(
+        f"""<script>
+        const secure = window.parent.location.protocol === "https:" ? "; Secure" : "";
+        window.parent.document.cookie = "{LOGIN_COOKIE}={token}; path=/; max-age={days * 86400}; SameSite=Strict" + secure;
+        </script>""",
+        height=0,
+    )
+
+
+# A refresh starts a new Streamlit session: log back in from the browser's login key
+if st.session_state.get("user_id") is None:
+    browser_key = st.context.cookies.get(LOGIN_COOKIE)
+    remembered = user_for_login_token(browser_key) if isinstance(browser_key, str) else None
+    if remembered:
+        st.session_state["user_id"], st.session_state["username"] = remembered
+        st.session_state["login_token"] = browser_key
+
 set_current_user(st.session_state.get("user_id"))
 if st.session_state.get("user_id") is None:
+    if st.session_state.pop("clear_login_cookie", False):
+        _set_login_cookie("", 0)
     st.navigation([st.Page("pages/login.py", title="Log in", icon="🔐")]).run()
     st.stop()
+
+new_token = st.session_state.pop("write_login_cookie", None)  # set by pages/login.py right after logging in
+if new_token:
+    _set_login_cookie(new_token, LOGIN_DAYS)
 
 # A brand-new account (no profile, no expenses) starts on the budget setup page,
 # not on a dashboard full of empty cards. Afterwards it always starts on Home.
@@ -155,7 +182,9 @@ with st.sidebar:
     st.divider()
     st.markdown(f"👤 Logged in as **{st.session_state.get('username', '')}**")
     if st.button("Log out", width="stretch"):
+        delete_login_token(st.session_state.get("login_token", ""))  # the browser's key stops working
         st.session_state.clear()  # also forgets this session's chat and agent memory
+        st.session_state["clear_login_cookie"] = True
         st.rerun()
     st.caption(f"**Active Period:** {period_label()}")
     st.caption("**Architecture:** LangGraph + SQLite3 + Pandas + OCR")

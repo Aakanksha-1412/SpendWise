@@ -17,7 +17,7 @@ from typing import Dict, Any, List
 
 from agent.state import AgentState
 from tools.ocr_tool import extract_receipt
-from tools.categorization_tool import parse_natural_language_expense, categorize_expense
+from tools.categorization_tool import INCOME_NOT_SAVED, parse_natural_language_expense, categorize_expense
 from tools.database_tool import add_transaction, get_transactions
 from tools.budget_tool import (
     calculate_budget_status,
@@ -25,13 +25,18 @@ from tools.budget_tool import (
     suggest_discretionary_reallocation,
 )
 from tools.spike_detector import detect_all_category_spikes
-from analytics.analytics import get_summary_metrics
-from utils.helpers import CATEGORIES, format_inr, period_label
+from analytics.analytics import check_spend_against_savings, get_summary_metrics
+from utils.helpers import CATEGORIES, expense_date_error, format_inr, period_label
 
 
 # ==============================================================================
 # NODE 1: UNDERSTAND REQUEST
 # ==============================================================================
+def _without_dates(text: str) -> str:
+    """The text with dates (01-10-2026, 25/09/2026) removed, so their digits aren't amounts."""
+    return re.sub(r"\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b", " ", text)
+
+
 def understand_request_node(state: AgentState) -> AgentState:
     """
     Analyze the user's natural language prompt, determine the primary intent,
@@ -52,15 +57,24 @@ def understand_request_node(state: AgentState) -> AgentState:
         if inferred != "Others":
             detected_cat = inferred
 
-    # Classify intent
-    if ("receipt" in q_lower or "add " in q_lower or "spent " in q_lower or "paid " in q_lower) and (
-        "budget" in q_lower or "left" in q_lower or "remaining" in q_lower
-    ):
-        intent = "ADD_EXPENSE_AND_CHECK_BUDGET"
-    elif any(phrase in q_lower for phrase in ["add ", "logged", "spent ₹", "spent rs", "paid ₹", "bought "]):
-        intent = "ADD_EXPENSE"
+    # Classify intent. Something is only SAVED when the user clearly asks (add/log/spent/
+    # paid/bought + a real amount, or an attached receipt) and it isn't a question or a
+    # "what if" ("can I afford", "if I spent", "would").
+    has_receipt = state.get("uploaded_receipt") is not None
+    hypothetical = re.search(r"\b(afford|can i spend|if i|what if|would|should i)\b", q_lower)
+    add_verb = re.search(r"\b(add|log|logged|record|spent|paid|bought)\b", q_lower)
+    real_amount = re.search(r"\d[\d,]*(?:\.\d+)?(?![\d.,]*\s*%)", _without_dates(q_lower))  # not "20%"
+    wants_budget = "budget" in q_lower or "left" in q_lower or "remaining" in q_lower
+    is_confirmation = re.fullmatch(r"((yes|yeah|yep|ok|okay|sure|please|do it|log it|add it|save it)[\s.!,]*)+", q_lower)
+
+    if is_confirmation:
+        intent = "NEEDS_DETAILS"
     elif "afford" in q_lower or "can i spend" in q_lower:
         intent = "AFFORDABILITY_CHECK"
+    elif (has_receipt or (add_verb and real_amount)) and not hypothetical:
+        intent = "ADD_EXPENSE_AND_CHECK_BUDGET" if wants_budget or has_receipt else "ADD_EXPENSE"
+    elif "receipt" in q_lower and not has_receipt and add_verb and not hypothetical:
+        intent = "NEEDS_RECEIPT"
     elif "alert" in q_lower or "exceed" in q_lower or "over budget" in q_lower or "why did i" in q_lower:
         intent = "EXPLAIN_BUDGET_ALERT"
     elif "spike" in q_lower or "increased the most" in q_lower or "unusual" in q_lower or "trend" in q_lower:
@@ -100,8 +114,10 @@ def decide_required_tool_node(state: AgentState) -> AgentState:
 
     tools_to_call: List[str] = []
 
-    if intent == "ADD_EXPENSE_AND_CHECK_BUDGET":
-        if has_receipt or "receipt" in state.get("user_query", "").lower():
+    if intent in ("NEEDS_DETAILS", "NEEDS_RECEIPT"):
+        pass  # nothing to look up: the reply asks the user for what's missing
+    elif intent == "ADD_EXPENSE_AND_CHECK_BUDGET":
+        if has_receipt:  # only a real attached photo is read; never a made-up demo receipt
             tools_to_call.append("ocr_tool.extract_receipt")
         else:
             tools_to_call.append("categorization_tool.parse_natural_language_expense")
@@ -138,6 +154,7 @@ def decide_required_tool_node(state: AgentState) -> AgentState:
             [
                 "budget_tool.get_all_budget_statuses",
                 "budget_tool.suggest_discretionary_reallocation",
+                "spike_detector.detect_all_category_spikes",
                 "database_tool.get_transactions",
             ]
         )
@@ -186,7 +203,7 @@ def call_tool_node(state: AgentState) -> AgentState:
     Execute the selected deterministic Python tools (OCR, SQLite, Pandas Budget/Spike).
     """
     selected_tools = state.get("selected_tools", [])
-    target_cat = state.get("target_category") or "Food"
+    target_cat = state.get("target_category")  # None when the question names no category
     query = state.get("user_query", "")
     trace = list(state.get("reasoning_trace", []))
     outputs: Dict[str, Any] = {}
@@ -198,7 +215,7 @@ def call_tool_node(state: AgentState) -> AgentState:
                 outputs["receipt_unreadable"] = True  # save nothing; the reply explains
                 continue
             # If user mentioned a specific amount in the prompt, override demo amount
-            amt_match = re.search(r"(?:₹|rs\.?|inr\s*)\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)", query, re.IGNORECASE)
+            amt_match = re.search(r"(?:₹|rs\.?|inr\s*)\s*(\d+(?:,\d{2,3})*(?:\.\d{1,2})?)", query, re.IGNORECASE)
             if amt_match:
                 receipt_data["total"] = float(amt_match.group(1).replace(",", ""))
             outputs["extracted_receipt"] = receipt_data
@@ -220,13 +237,19 @@ def call_tool_node(state: AgentState) -> AgentState:
                     "description": tx_source.get("description", "Added via SpendWise AI Agent"),
                     "source": tx_source.get("source", "Receipt" if "extracted_receipt" in outputs else "Text"),
                 }
-                if tx_payload["amount"] > 0:
+                date_problem = expense_date_error(tx_payload["date"] or "")
+                if tx_source.get("looks_like_income"):
+                    outputs["not_saved_reason"] = INCOME_NOT_SAVED
+                elif date_problem:
+                    outputs["not_saved_reason"] = f"This expense was not saved. {date_problem}"
+                elif tx_payload["amount"] > 0:
                     saved_tx = add_transaction(tx_payload)
                     outputs["saved_transaction"] = saved_tx
                     target_cat = saved_tx["category"]
 
         elif tool_name == "budget_tool.calculate_budget_status":
-            outputs["category_budget_status"] = calculate_budget_status(target_cat)
+            if target_cat:
+                outputs["category_budget_status"] = calculate_budget_status(target_cat)
 
         elif tool_name == "budget_tool.get_all_budget_statuses":
             outputs["all_budget_statuses"] = get_all_budget_statuses()
@@ -239,16 +262,18 @@ def call_tool_node(state: AgentState) -> AgentState:
 
         elif tool_name == "spike_detector.detect_spending_spike":
             from tools.spike_detector import detect_spending_spike
-            outputs["category_spike"] = detect_spending_spike(target_cat)
+            if target_cat:
+                outputs["category_spike"] = detect_spending_spike(target_cat)
 
         elif tool_name == "analytics.get_summary_metrics":
             outputs["summary_metrics"] = get_summary_metrics()
 
         elif tool_name == "database_tool.get_transactions":
-            # Biggest purchases in the first over-budget category (real SQLite rows)
+            # Biggest purchases in the asked-about category, else the first over-budget one
             over_cats = outputs.get("reallocation_plan", {}).get("over_budget_categories", [])
-            if over_cats:
-                rows = get_transactions(category=over_cats[0]["category"])
+            alert_cat = target_cat or (over_cats[0]["category"] if over_cats else None)
+            if alert_cat:
+                rows = get_transactions(category=alert_cat)
                 outputs["top_transactions"] = sorted(rows, key=lambda r: r["amount"], reverse=True)[:3]
 
     trace.append(
@@ -288,26 +313,37 @@ def evaluate_result_node(state: AgentState) -> AgentState:
             f"Remaining: {format_inr(b_stat['remaining'])}, Utilization: {b_stat['utilization_pct']}%)."
         )
 
-    if intent == "AFFORDABILITY_CHECK" and "category_budget_status" in outputs:
-        b_stat = outputs["category_budget_status"]
+    if intent == "AFFORDABILITY_CHECK":
+        b_stat = outputs.get("category_budget_status")  # None when no category was named
         # Prefer a number marked as money ("₹500", "rs 500", "500 rupees") over any other number ("2 pizzas")
-        number = r"(\d+(?:,\d{3})*(?:\.\d{1,2})?)"
+        number = r"(\d+(?:,\d{2,3})*(?:\.\d{1,2})?)"  # 2,00,000 (Indian) and 200,000 both work
+        text = _without_dates(query)
         amt_match = (
-            re.search(r"(?:₹|\brs\.?|\binr)\s*" + number, query, re.IGNORECASE)
-            or re.search(number + r"\s*(?:rs\b|rupees\b|inr\b|/-)", query, re.IGNORECASE)
-            or re.search(number, query)
+            re.search(r"(?:₹|\brs\.?|\binr)\s*" + number, text, re.IGNORECASE)
+            or re.search(number + r"\s*(?:rs\b|rupees\b|inr\b|/-)", text, re.IGNORECASE)
+            or re.search(number, text)
         )
-        proposed_amt = float(amt_match.group(1).replace(",", "")) if amt_match else 500.0
-        post_remaining = round(b_stat["remaining"] - proposed_amt, 2)
-        can_afford = post_remaining >= 0
+        proposed_amt = float(amt_match.group(1).replace(",", "")) if amt_match else None
+        savings = check_spend_against_savings(proposed_amt) if proposed_amt else None
+        has_budget = bool(b_stat) and b_stat["status"] != "NO BUDGET SET"
+        post_remaining = round(b_stat["remaining"] - proposed_amt, 2) if has_budget and proposed_amt else None
+        can_afford = (
+            proposed_amt is not None
+            and (post_remaining is None or post_remaining >= 0)
+            and (savings is None or savings["fits"])
+        )
         outputs["affordability_eval"] = {
             "proposed_amount": proposed_amt,
             "can_afford": can_afford,
             "remaining_after_expense": post_remaining,
+            "savings_message": savings["message"] if savings else None,
+            "left_to_spend": savings["left_to_spend"] if savings else None,
+            "no_category": b_stat is None,
+            "no_budget": bool(b_stat) and not has_budget,
         }
         notes.append(
-            f"Affordability evaluation for {format_inr(proposed_amt)} in {b_stat['category']}: "
-            f"`{'FEASIBLE' if can_afford else 'EXCEEDS BUDGET'}` (Projected remaining: {format_inr(post_remaining)})."
+            f"Affordability evaluation for {format_inr(proposed_amt or 0)}: "
+            f"`{'FEASIBLE' if can_afford else 'NOT CONFIRMED'}`."
         )
 
     trace.append(
@@ -336,7 +372,19 @@ def generate_response_node(state: AgentState) -> AgentState:
     outputs = state.get("tool_outputs", {})
     trace = list(state.get("reasoning_trace", []))
 
-    if intent in ("ADD_EXPENSE_AND_CHECK_BUDGET", "ADD_EXPENSE"):
+    if intent == "NEEDS_DETAILS":
+        response = (
+            "I'm in demo mode, so I can't see your earlier message and **nothing was saved**. "
+            "Please type the whole expense, for example: *Add ₹450 at Swiggy for food*."
+        )
+
+    elif intent == "NEEDS_RECEIPT":
+        response = (
+            "I don't see a receipt photo with your message, so **nothing was saved**. "
+            "Please attach the photo, or type the shop and amount, for example: *Add ₹471 at Behrouz Biryani for food*."
+        )
+
+    elif intent in ("ADD_EXPENSE_AND_CHECK_BUDGET", "ADD_EXPENSE"):
         saved_tx = outputs.get("saved_transaction")
         b_stat = outputs.get("category_budget_status", {})
         if saved_tx:
@@ -351,6 +399,8 @@ def generate_response_node(state: AgentState) -> AgentState:
                 f"- **Total Spent:** {format_inr(b_stat.get('spent', 0))} ({b_stat.get('utilization_pct', 0)}%)\n"
                 f"- **Remaining Budget:** **{format_inr(b_stat.get('remaining', 0))}** (`{b_stat.get('status', 'OK')}`)"
             )
+        elif outputs.get("not_saved_reason"):
+            response = f"**{outputs['not_saved_reason']}**"
         elif outputs.get("receipt_unreadable"):
             response = (
                 "I couldn't read that receipt photo. Please type the merchant and amount "
@@ -380,13 +430,36 @@ def generate_response_node(state: AgentState) -> AgentState:
             )
 
     elif intent == "AFFORDABILITY_CHECK":
-        b_stat = outputs.get("category_budget_status", {})
+        b_stat = outputs.get("category_budget_status") or {}
         eval_data = outputs.get("affordability_eval", {})
-        proposed = eval_data.get("proposed_amount", 500.0)
-        rem_after = eval_data.get("remaining_after_expense", 0.0)
-        can_afford = eval_data.get("can_afford", True)
+        proposed = eval_data.get("proposed_amount")
+        rem_after = eval_data.get("remaining_after_expense")
+        can_afford = eval_data.get("can_afford", False)
+        left_to_spend = eval_data.get("left_to_spend")
+        fits_savings = (
+            f"It fits in the {format_inr(left_to_spend)} you have left to spend this month while keeping your savings goal."
+            if left_to_spend is not None
+            else ""
+        )
 
-        if can_afford:
+        if proposed is None:
+            response = "How much is it? Ask like this: *Can I afford ₹2,000 on shopping?*"
+        elif eval_data.get("savings_message"):
+            response = f"**{eval_data['savings_message']}**"
+        elif eval_data.get("no_category"):
+            response = (
+                f"**Yes, overall.** {fits_savings} "
+                f"Tell me the category (for example: *Can I afford {format_inr(proposed)} on shopping?*) "
+                "and I'll also check it against that budget."
+                if left_to_spend is not None
+                else f"Which category is this for? Ask like this: *Can I afford {format_inr(proposed)} on shopping?*"
+            )
+        elif eval_data.get("no_budget"):
+            response = (
+                f"You haven't set a {b_stat['category']} budget, so I can't check {format_inr(proposed)} against one. "
+                f"{fits_savings} You can set a {b_stat['category']} budget on the 🎯 Budget page."
+            )
+        elif can_afford:
             response = (
                 f"**Yes — You can afford a {format_inr(proposed)} expense in {b_stat.get('category', 'Food')}.**\n\n"
                 f"- **Current Remaining {b_stat.get('category')} Budget:** {format_inr(b_stat.get('remaining', 0))}\n"
@@ -412,6 +485,11 @@ def generate_response_node(state: AgentState) -> AgentState:
     elif intent == "EXPLAIN_BUDGET_ALERT":
         reallocation = outputs.get("reallocation_plan", {})
         over_cats = reallocation.get("over_budget_categories", [])
+        spikes = [s for s in outputs.get("all_spikes", []) if s["spike_detected"]]
+        asked = state.get("target_category")  # the category the user asked about, if any
+        if asked:
+            over_cats = [c for c in over_cats if c["category"] == asked]
+            spikes = [s for s in spikes if s["category"] == asked]
         if over_cats:
             ob = over_cats[0]
             response = (
@@ -426,8 +504,22 @@ def generate_response_node(state: AgentState) -> AgentState:
                 + f"\n**💡 SpendWise Reallocation Suggestion:**\n"
                 + "\n".join(f"- {s}" for s in reallocation.get("suggestions", []))
             )
+        elif spikes:
+            sp = spikes[0]
+            response = (
+                f"### Why You Received a {sp['category']} Spending Alert\n\n"
+                f"{sp['message']}\n\n"
+                f"- **Previous week:** {format_inr(sp['previous_weekly_spending'])}\n"
+                f"- **This week:** **{format_inr(sp['current_weekly_spending'])}**\n\n"
+                f"Try pacing your {sp['category'].lower()} expenses over the rest of the month."
+            )
+        elif asked:
+            status = next((s for s in outputs.get("all_budget_statuses", []) if s["category"] == asked), None)
+            response = f"There is no {asked} alert right now."
+            if status and status["budget"] > 0:
+                response += f" You've spent {format_inr(status['spent'])} of your {format_inr(status['budget'])} {asked} budget."
         else:
-            response = "You currently have no categories exceeding their monthly budget."
+            response = "You have no budget or spending alerts right now."
 
     elif intent == "CHECK_SPENDING_SPIKE":
         spikes = outputs.get("all_spikes", [])
@@ -436,7 +528,7 @@ def generate_response_node(state: AgentState) -> AgentState:
             top = active_spikes[0]
             response = (
                 f"### Spending Spike Analysis\n\n"
-                f"🚨 **{top['category']}** increased the most this week (**+{top['increase_pct']}%**).\n\n"
+                f"🚨 **{top['category']}** increased the most this week (**{top['change_label']}**).\n\n"
                 f"- **Previous Weekly {top['category']} Spending:** {format_inr(top['previous_weekly_spending'])}\n"
                 f"- **Current Weekly {top['category']} Spending:** **{format_inr(top['current_weekly_spending'])}**\n"
                 f"- **Net Weekly Increase:** +{format_inr(top['increase_amount'])}\n\n"
@@ -471,7 +563,7 @@ def generate_response_node(state: AgentState) -> AgentState:
             f"{c['category']} over budget by {format_inr(abs(c['remaining']))}"
             for c in reallocation.get("over_budget_categories", [])
         ] + [
-            f"weekly {s['category']} spike +{s['increase_pct']}%"
+            f"weekly {s['category']} spike {s['change_label']}"
             for s in outputs.get("all_spikes", [])
             if s["spike_detected"]
         ]
