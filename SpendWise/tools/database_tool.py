@@ -48,55 +48,61 @@ def add_transaction(transaction: Dict[str, Any], learn_category: bool = True) ->
     -------
     dict : The newly created transaction record including `id` and `created_at`.
     """
-    init_db()
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    date_str = normalize_date(str(transaction.get("date", "")))
-    merchant = str(transaction.get("merchant", "Unknown Merchant")).strip()
-    amount = float(transaction.get("amount", 0.0))
-    # Accept any spelling case ("food", "FOOD" -> "Food"); unknown names become "Others"
-    category_text = str(transaction.get("category", "Others")).strip().lower()
-    category = next((official for official in CATEGORIES if official.lower() == category_text), "Others")
-    description = str(transaction.get("description", "")).strip()
-    source = str(transaction.get("source", "Text")).strip()
-    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    cursor.execute(
-        """
-        INSERT INTO transactions (user_id, date, merchant, amount, category, description, source, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (current_user_id(), date_str, merchant, amount, category, description, source, created_at),
-    )
-    new_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
+    saved = _insert_transactions([transaction])[0]
 
     # Teach ChromaDB semantic memory this merchant -> category (never blocks saving)
     if learn_category:
-        remember_merchant_category(merchant, category)
-
-    return {
-        "id": new_id,
-        "date": date_str,
-        "merchant": merchant,
-        "amount": amount,
-        "category": category,
-        "description": description,
-        "source": source,
-        "created_at": created_at,
-    }
+        remember_merchant_category(saved["merchant"], saved["category"])
+    return saved
 
 
 def bulk_insert_transactions(transactions: List[Dict[str, Any]]) -> int:
     """
     Insert multiple transactions (e.g., from CSV upload) into SQLite.
-    Returns count of inserted records.
+    All of them are saved, or (if any fails) none. Returns count of inserted records.
     """
-    saved = [add_transaction(tx, learn_category=False) for tx in transactions]
+    saved = _insert_transactions(transactions)
     remember_merchant_categories([(tx["merchant"], tx["category"]) for tx in saved])  # one ChromaDB write
     return len(saved)
+
+
+def _insert_transactions(transactions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Clean and insert rows in ONE database transaction (all or nothing); always closes the connection."""
+    init_db()
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    saved = []
+    conn = get_connection()
+    try:
+        with conn:  # commits at the end, or rolls everything back on an error
+            for transaction in transactions:
+                date_str = normalize_date(str(transaction.get("date", "")))
+                merchant = str(transaction.get("merchant", "Unknown Merchant")).strip()
+                amount = float(transaction.get("amount", 0.0))
+                # Accept any spelling case ("food", "FOOD" -> "Food"); unknown names become "Others"
+                category_text = str(transaction.get("category", "Others")).strip().lower()
+                category = next((official for official in CATEGORIES if official.lower() == category_text), "Others")
+                description = str(transaction.get("description", "")).strip()
+                source = str(transaction.get("source", "Text")).strip()
+                cursor = conn.execute(
+                    """
+                    INSERT INTO transactions (user_id, date, merchant, amount, category, description, source, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (current_user_id(), date_str, merchant, amount, category, description, source, created_at),
+                )
+                saved.append({
+                    "id": cursor.lastrowid,
+                    "date": date_str,
+                    "merchant": merchant,
+                    "amount": amount,
+                    "category": category,
+                    "description": description,
+                    "source": source,
+                    "created_at": created_at,
+                })
+    finally:
+        conn.close()
+    return saved
 
 
 def get_transactions(

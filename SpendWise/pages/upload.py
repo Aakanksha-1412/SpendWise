@@ -73,7 +73,7 @@ def render_upload_page() -> None:
                         outcome = import_rows(result["rows"])
                         message = f"Imported {outcome['imported']} new expenses."
                         if outcome["duplicates"]:
-                            message += f" Skipped {outcome['duplicates']} already saved before (no duplicates)."
+                            message += f" Skipped {outcome['duplicates']} that were already saved in SpendWise."
                         st.success(message)
                 else:
                     st.warning("No expenses could be read from this file.")

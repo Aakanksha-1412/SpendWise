@@ -80,14 +80,24 @@ def format_inr(amount: float, include_sign: bool = False) -> str:
     return f"₹{formatted}"
 
 
+# Date formats SpendWise understands, including those in Indian bank exports
+# ("25 Oct 2026", "25-Oct-2026", "25/10/26"). Four-digit years are tried first.
+DATE_FORMATS = (
+    "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d",
+    "%d %b %Y", "%d-%b-%Y", "%d %B %Y", "%d-%B-%Y",
+    "%d/%m/%y", "%d-%m-%y", "%d %b %y", "%d-%b-%y",
+)
+
+
 def normalize_date(date_str: str) -> str:
     """
-    Normalize input dates (YYYY-MM-DD or DD-MM-YYYY) into standard DD-MM-YYYY display format.
+    Normalize input dates (DD-MM-YYYY, YYYY-MM-DD, 25 Oct 2026, 25/10/26, ...) into
+    standard DD-MM-YYYY display format.
     """
     if not date_str:
         return datetime.now().strftime("%d-%m-%Y")
 
-    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
+    for fmt in DATE_FORMATS:
         try:
             dt = datetime.strptime(date_str.strip(), fmt)
             return dt.strftime("%d-%m-%Y")
@@ -100,7 +110,7 @@ def to_iso_date(date_str: str) -> str:
     """
     Convert DD-MM-YYYY or YYYY-MM-DD into ISO YYYY-MM-DD for chronological sorting and Pandas filtering.
     """
-    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
+    for fmt in DATE_FORMATS:
         try:
             dt = datetime.strptime(date_str.strip(), fmt)
             return dt.strftime("%Y-%m-%d")
