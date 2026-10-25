@@ -223,3 +223,15 @@ def test_demo_mode_asks_for_details_on_a_bare_yes(no_gemini):
 
     assert "nothing was saved" in result["response"]
     assert get_transactions() == []
+
+
+def test_demo_mode_treats_can_i_with_an_amount_as_affordability(no_gemini):
+    from tools.database_tool import get_transactions
+
+    _fresh_demo_user({"Food": 2000})
+
+    result = run_agent("can i eat icecream of 500")
+
+    assert result["intent"] == "AFFORDABILITY_CHECK"
+    assert "₹500" in result["response"]
+    assert get_transactions() == []  # a question never saves anything
