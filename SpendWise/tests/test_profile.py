@@ -136,7 +136,7 @@ def test_money_plan_numbers():
     assert plan["unplanned"] == 12000  # income not given to any budget or savings
     labels = {row["category"]: row["label"] for row in plan["categories"]}
     assert labels["Food"] == "⚠️ almost full"  # 87.5% used
-    assert labels["Shopping"] == "🚨 full"  # over budget
+    assert labels["Shopping"] == "🚨 over by ₹200"  # 1,200 spent of 1,000
     assert labels["Bills"] == "– no budget"
 
 

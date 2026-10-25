@@ -212,9 +212,17 @@ def check_spend_against_savings(amount: float) -> Optional[Dict[str, Any]]:
 STATUS_LABELS = {
     "UNDER BUDGET": "✅ fine",
     "NEAR LIMIT": "⚠️ almost full",
-    "OVER BUDGET": "🚨 full",
     "NO BUDGET SET": "– no budget",
 }
+
+
+def _status_label(status: Dict[str, Any]) -> str:
+    """Short status for the money plan, e.g. "🚨 over by ₹500" or "⚠️ full"."""
+    if status["status"] == "OVER BUDGET":
+        return f"🚨 over by {format_inr(-status['remaining'])}"
+    if status["budget"] > 0 and status["remaining"] == 0:
+        return "⚠️ full"
+    return STATUS_LABELS[status["status"]]
 
 
 def get_money_plan(month: Optional[int] = None, year: Optional[int] = None) -> Optional[Dict[str, Any]]:
@@ -260,5 +268,5 @@ def get_money_plan(month: Optional[int] = None, year: Optional[int] = None) -> O
         "can_still_spend": round(income - savings_goal - spent, 2),
         "unplanned": round(max(income - savings_goal - budget_total, 0.0), 2),
         "income_split": income_split,  # adds up to monthly_income
-        "categories": [{**s, "label": STATUS_LABELS[s["status"]]} for s in statuses],
+        "categories": [{**s, "label": _status_label(s)} for s in statuses],
     }
