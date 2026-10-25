@@ -439,6 +439,10 @@ Streamlit Community Cloud (free):
    ```
 4. **Deploy.** The app updates automatically after each merge into `main` (or use *Reboot app*).
 
+`packages.txt` (at the **top of the repository**, where Streamlit looks for it) installs Tesseract OCR on the server,
+so receipts can still be read when Gemini Vision is unavailable. If the repository is private, the app is private too:
+make it public in the app's **Settings → Sharing**.
+
 On the free plan the server can restart, which resets the SQLite data and accounts — fine for a demo.
 Everyone using the link shares the Gemini key's free daily limit.
 
